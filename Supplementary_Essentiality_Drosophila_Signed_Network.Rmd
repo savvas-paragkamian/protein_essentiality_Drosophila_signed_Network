@@ -1,0 +1,3845 @@
+---
+title: The centrality lethality rule in the signed protein interaction network
+  of Drosophila
+author: "Savas Paragamian"
+date: '`r Sys.Date()`'
+output:
+  bookdown::pdf_book: default
+  bookdown::html_book: default
+  bookdown::gitbook: default
+  bookdown::word_document2: default
+  pdf_document:
+    fig_caption: yes
+    keep_tex: yes
+    latex_engine: xelatex
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+  word_document: default
+documentclass: book
+link-citations: yes
+bibliography: Networks Centralities and Negative Weigths.bib
+site: bookdown::bookdown_site
+biblio-style: apalike
+---
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+library(readxl)
+library(readr)
+library(ggplot2)
+library(igraph)
+library(ggraph)
+library(scales)
+library(gridExtra)
+library(reshape2)
+library(dplyr)
+library(knitr)
+library(tidyr)
+
+opts_chunk$set(tidy.opts=list(width.cutoff=100),tidy=TRUE) # format output for chunks not to exceed the page width
+
+### Create output folders in the same directory as the .Rmd file is in.
+
+dir.create("Figures")
+dir.create("Tables")
+
+```
+
+# Data exploration and preparation
+
+## The network: first look 
+This is the analysis of the network data provided by the authors of the article [@Vinayagam2014b].
+
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+
+#### load the file
+dros <- read_excel("Data/nmeth.2733-S2.xlsx")
+
+## Data to dataframe
+
+dros_values <- dros[,c(1,2,3,4,5,7,9)]
+dros_values$Sign_Score <- as.numeric(dros_values$Sign_Score)
+dros_values$Coexpress_Development <- as.numeric(dros_values$Coexpress_Development)
+dros_values$sign_score_sign <- with(dros_values, ifelse(Sign_Score<0, paste0("negative"), paste0("positive"))) 
+dros_values$coexpress_sign <- with(dros_values, ifelse(Coexpress_Development<0, paste0("negative"), paste0("positive")))
+dros_values$compare <- with(dros_values, ifelse(sign(Coexpress_Development)==sign(Sign_Score), paste0("same"), paste0("different")))
+dros_values$color <- with(dros_values, ifelse(Sign_Score<0, paste0("red"), paste0("green")))
+
+```
+
+The file *nmeth.2733-S2.xlsx*, download from supplementary information, is an edge list for the network. It has 6125 rows (links) and the following 20 columns. 
+
+```{r, echo=FALSE}
+colnames(dros)
+```
+
+The first 2 columns are the proteins that interact with the proteins in the 3-4 columns. So the **ID** and **Symbol** columns refer to an individual protein. The **ID** is the id of the protein in the [FlyBase](http://flybase.org/) database (e.g *FBgn0041604*) and the **Symbol** is the name of the protein which provides some information about it's function (e.g *dlp*).
+
+The 5th column, **Source_Type**, is a link attribute of whether the **Sign_Score** of the link was *Predicted* from the authors framework or was added from *Literature*.
+
+
+```{r, echo=FALSE, warning=FALSE}
+attach(dros_values)
+predicted <- dros_values[Source_Type=="Predicted",] # 5691 rows, 
+literature <- dros_values[Source_Type=="Literature",] # 434 rows
+detach(dros_values)
+
+ggplot()+
+  geom_bar(data = dros_values, aes(Source_Type, y= ..count.., fill=Source_Type),show.legend = F)+
+  #ggtitle("Inferring methods of the Sign Score of the PPI network of Drosophila gene")+
+  labs(x="Source Type", y= "Number of protein links")+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("weights_methods_source.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+
+```
+
+## Duplicates removal
+Next, we want to check the uniqueness of the links. In order to check this we first concatenate the node IDs for each link and then we check for uniqueness.
+
+```{r, echo=FALSE}
+dros_values$IDS <- with(dros_values,paste(dros_values$ID1,dros_values$ID2,sep = ",")) # concarnate in order to find duplicated links
+length(unique(dros_values$IDS)) # how many unique links
+```
+There are `r length(unique(dros_values$IDS))` unique links but the number of links is `r nrow(dros_values)`.
+```{r, echo=FALSE}
+nrow(dros_values)
+```
+
+So there are some duplicates. Next we want to label each link to see if it's duplicated in order to find the reasons of the duplicates.
+
+```{r}
+dros_values$duplicate <- duplicated(dros_values$IDS) | duplicated(dros_values$IDS, fromLast = TRUE) # returns TRUE for all duplicates, not the first ones only
+
+```
+
+Looking through the data is ease to recognize that the origin of the duplicates comes from the overlap of some links of the *Literature* and the *Predicted* methods for the *Sign Score*. Now we have to select from the duplicates. I will disregard the *Literature* duplicates.
+
+```{r}
+dros_values <- dros_values[!(dros_values$duplicate=="TRUE"& dros_values$Source_Type=="Literature"), ] # Selection of the duplicates
+
+print(paste0("Number of rows after the removal of duplicates = ",nrow(dros_values)))
+print(paste0("Number of unique links after the removal of duplicates = ",length(unique(dros_values$IDS))))
+```
+Now there only unique links.
+
+## Weights examination
+
+The 7th, **Sign_Score** and the 9th, **Coexpress_Development**, columns are different signed weights of the PPI network generated from different experiments. **Sign_Score** is predicted from RNAi screens in Drosophila and **Coexpress_Development** is predicted from time-course gene expression data, microarrays. **Coexpress_Development** has **`r sum(is.na(dros_values$Coexpress_Development))`** missing values and **Sign_Score** doesn't have, missing values= **`r sum(is.na(dros_values$Sign_Score))`**.
+
+First we can see the sign similarity of each method.
+
+
+```{r, echo=FALSE, warning=FALSE}
+### Bar plot of the different signs of Sign Score and Coexpress Correlation
+ggplot()+
+  geom_bar(data = dros_values, aes(compare, y= ..count.., fill=compare))+
+  #ggtitle("Difference of signs of Sign Score and Coexpress Correlation")+
+  guides(fill=FALSE)+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("weights_signs_difference.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+
+So it is obvious that the different methods produce different weights for the interactions.
+
+Some statistics of the Sign Scores:
+```{r}
+summary(dros_values$Sign_Score)
+```
+and for the Coexpress Correlations
+```{r}
+summary(dros_values$Coexpress_Development)
+```
+
+
+Here we can see the different density plots of each: 
+```{r, echo=FALSE, warning=FALSE}
+### Sign Scores and Coexpression Correlation
+
+# Scatterplot
+ggplot()+
+  geom_point(data = dros_values, 
+             aes(x = Sign_Score, 
+                 y=Coexpress_Development,
+                 color=Source_Type),show.legend = TRUE)+
+  geom_smooth()+
+  labs(x="Sign_Score", y="Coexpress_Development")+
+  #ggtitle("Scatterplot Coexpress_Development Sign_Score")+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("different_weights_scatterplot.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+
+# boxplot different weights:sign scores and coexpress correlations
+
+sign_coexpr <- dros_values[,c(6,7)]
+
+melt_sign_coexpr <- melt(data = sign_coexpr,na.rm = F)
+
+ggplot()+
+  geom_boxplot(data = melt_sign_coexpr, 
+               aes(x =variable, y = value, color=variable))+
+  #ggtitle("Drosophila PPI network weights")+
+  labs(x="Type of weights", y= "Values")+
+  guides(color=FALSE)+
+  theme_bw()
+
+ggsave("different_weights_boxplot.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+## Weights normalization
+
+```{r}
+
+dros_values$norm_weights <- sapply(dros_values$Sign_Score, function(x) x/max(abs(dros_values$Sign_Score)))
+
+dros_values$sign_weights <- with(dros_values, ifelse(Sign_Score<0, -1, 1))
+dros_values$abs_weights <- abs(dros_values$norm_weights)
+
+# boxplot different weights:sign scores, normalized with max value and just signs
+
+signs_norm <- dros_values[,c("norm_weights","Sign_Score","sign_weights")]
+
+melt_sign_norm <- melt(data = signs_norm,na.rm = F)
+
+ggplot()+
+  geom_boxplot(data = melt_sign_norm, 
+               aes(x =variable, y = value, color=variable))+
+  #ggtitle("Drosophila PPI network normalized weights")+
+  labs(x="Type of weights", y= "Values")+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("type_weights_boxplot.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+
+# Density
+
+ggplot()+
+  geom_freqpoly(data = melt_sign_norm, bins=80,
+                aes(value, y=..density..,color=variable))+
+  labs(x="Value", y="Density")+
+  #ggtitle("Densities of Sign Scores, normalized Sign Scores and their Signs")+
+  theme_bw()
+
+ggsave("type_weights_densities.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+ggplot()+
+  geom_freqpoly(data = dros_values, bins=80,
+                aes(Sign_Score, y=..density..,color="Sign Score"))+
+  geom_freqpoly(data = dros_values, bins=80,
+                aes(Coexpress_Development, y=..density..,color="Coexpress Development"))+
+  geom_freqpoly(data = dros_values, bins=80,
+                aes(norm_weights, y=..density..,color="Sign Score Normalized"))+
+  labs(x="Value", y="Density")+
+  scale_x_continuous(breaks = seq(-3,5,1))+
+  scale_y_continuous(breaks = seq(0,4,1))+
+  coord_fixed(ratio = 1)+
+  scale_colour_manual(values = c("Sign Score"="firebrick1","Coexpress Development"="dodgerblue", "Sign Score Normalized"="forestgreen"), name="Edge Weights")+
+  #ggtitle("Densities of Sign Scores and Coexpression Correlation")+
+  theme_bw()+
+  theme(legend.position = c(0.825,0.85))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+ggsave("different_weights_densities.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+
+
+```
+
+# Network centrality-leathality analysis
+## Biological gene essentiality
+
+Before we see the network it is important to enrich the data with gene essentiality in order to analyse them altogether.
+
+>**Essential** *genes are the genes that when removed from the organism it cannot survive or is infertile.*
+
+The authors of the article **Predicting Essential Genes and Proteins Based on Machine Learning and Network Topological Features/ A Comprehensive Review** write:
+
+>*currently, the available essential genes and protein databases are DEG (Zhang and Lin, 2009), CEG (Ye et al., 2013), OGEE (Chen et al., 2012), and [EGGS](http://www.nmpdr.org/FIG/eggs.cgi). These data have enabled researchers to explore the features of essential genes and proteins and, through this exploration, reveal which features are associated with essentiality and, finally, develop computational methods proposed to identify essential genes and proteins. *
+
+We used [OGEE](http://ogee.medgenius.info/browse/) for the genes of *Drosophila melanogaster*. We downloaded a file with all the known essential genes and their IDs.
+
+```{r, echo=FALSE,warning=FALSE}
+dros_essential <- read.table("Data/OGEE_Drosophila_melanogaster_consolidated.csv",sep = ",",header = T)
+
+summary(dros_essential)
+
+## Bar plot of Gene esssentiality consesus of OGEE for Drosophila
+ggplot()+
+  geom_bar(data = dros_essential, aes(essentiality.consensus, y= ..count.., fill=essentiality.consensus))+
+  #ggtitle("OGEE Drosophila gene essentiality from different sources")+
+  labs(x="Data source", y= "Number of genes")+
+  guides(fill=FALSE)+
+  theme_bw()
+
+ggsave("essentiality_consensus_barplot.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+These are the types of Essentiality Consensus. These data were generated from 2 screens, so Conditional means that one screen identified a gene as *Essential* but the other screen as *Nonessential*.
+
+Next we want to enrich the genes with the Essentiality Consensus.
+
+```{r}
+## Enrich every ID in the edge list
+dros_values$ID1_consensus <- dros_essential[match(dros_values$ID1,dros_essential$locus),"essentiality.consensus"]
+dros_values$ID2_consensus <- dros_essential[match(dros_values$ID2,dros_essential$locus),"essentiality.consensus"]
+
+# Drospphila network genes with IDs
+dros_network_genes <- as.data.frame(unique(c(dros_values$ID1, dros_values$ID2)))
+
+dros_genes <- as.data.frame(unique(dros_values[,1]))
+colnames(dros_network_genes)[1] <- "locus"
+
+dros_network_genes <- merge(dros_network_genes,dros_essential, by.x=1, by.y=1, all.x=T)
+dros_network_genes$color <- with(dros_network_genes, ifelse(essentiality.consensus=="Essential", paste0("red"),ifelse(essentiality.consensus=="Conditional", paste0("orange"),paste0("green"))))
+#summary(dros_network_genes$essentiality.consensus)
+
+write.table(dros_network_genes, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/dros_network_genes.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+## Bar plot of Gene esssentiality consesus of OGEE for Drosophila
+ggplot()+
+  geom_bar(data = dros_network_genes, aes(essentiality.consensus, y= ..count.., fill=essentiality.consensus))+
+  #ggtitle("Drosophila gene network essentiality from different sources")+
+  labs(x="Data source", y= "Number of genes")+
+  guides(fill=FALSE)+
+  theme_bw()
+
+ggsave("essentiality_consensus_bar_plot.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+There are 156 genes that don't match because there is not information about their Essentiality Consensus.
+
+
+
+
+## Network degree distribution
+From the edge list, using the package *igraph* we can create the network with edge attribute the **Sign Score**. The network is **directed**. The authors mention the methods that allowed them to extract the interactions directionality. 
+
+```{r, warning=FALSE,message=FALSE}
+
+dros_net <- dros_values[,-c(2,4)] # edgelist, remove the names of the proteins! 
+colnames(dros_net)[4] <- "weights"
+
+write.table(dros_net, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/dros_net.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+dros_vertex_attr <- dros_network_genes[,c(1,6,7)]
+g <- graph_from_data_frame(dros_net, directed = T, vertices = dros_vertex_attr)
+summary(g)
+```
+
+The network isn't connected.
+```{r}
+igraph::is.connected(g)
+```
+From the igraph object, the network, it is possible to extract the weighted adjacency matrix.
+
+```{r, , echo=FALSE, warning=FALSE,message=FALSE}
+library(Matrix)
+
+adjacency_g <- as_adjacency_matrix(g, attr = "weights",names = T)
+adjacency_g <- as.data.frame(as.matrix(adjacency_g))
+
+sum(sapply(adjacency_g,is.character)) # if 0 then there are no characters inside dataframe! 
+
+adjacency_norm_weights <- as_adjacency_matrix(g, attr = "norm_weights",names = T)
+adjacency_norm_weights <- as.data.frame(as.matrix(adjacency_norm_weights))
+#sum(sapply(adjacency_norm_weights,is.character)) # if 0 then there are no characters inside dataframe!
+#g_norm <- graph_from_adjacency_matrix(adjacency_norm_weights,mode = "directed",weighted = T)
+#write_graph(g_norm,file = "edgelist_g_norm.txt",format = "ncol")
+
+adjacency_weight_signs <- as_adjacency_matrix(g, attr = "sign_weights",names = T)
+adjacency_weight_signs <- as.data.frame(as.matrix(adjacency_weight_signs))
+sum(sapply(adjacency_weight_signs,is.character)) # if 0 then there are no characters inside dataframe!
+
+write.table(adjacency_g,file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/adjacency_matrix_Protein_Net_Drosophila.txt",sep = "\t",row.names = T,col.names = T) # the file of the adjacency matrix.
+
+write.table(adjacency_norm_weights,file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/adjacency_matrix_Normalized_Protein_Net_Drosophila.txt",sep = "\t",row.names = T,col.names = T)
+
+write.table(adjacency_weight_signs,file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/adjacency_matrix_Signs_Protein_Net_Drosophila.txt",sep = "\t",row.names = T,col.names = T)
+
+#from Stelios, check if there are characters inside the adjacency matrix
+#s_df <- read.delim("adjacency_norm_weights_matrix_Protein_Net_Drosophila.txt", row.names=1,header = T)
+
+# the same using lapply
+l1<-lapply(adjacency_norm_weights,is.character)
+l2<-bind_cols(l1)
+rowSums(l2) # if 0 then there are no characters inside dataframe!
+
+## check if there are the same values by calculating the sum
+sum(colSums(adjacency_g))==sum(dros_values$Sign_Score)
+
+length(which(adjacency_g==0))
+length(which(adjacency_g!=0))
+
+length(as.matrix(adjacency_g))==length(which(adjacency_g==0))+length(which(adjacency_g!=0))
+
+
+print(paste0("Number of non zero elements of the adjacency matrix = ",nnzero(adjacency_g)))
+```
+
+
+To make further calculations we isolate the giant component.
+
+```{r}
+decg<-decompose.graph(g, min.vertices = 10) #upografima tis megalis sinistosas 
+gcomp<-decg[[1]]
+```
+
+
+One of the first things to examine is the degree distribution of the graph.
+
+```{r, echo=FALSE}
+# Degree distribution of the graph
+de <- igraph::degree(gcomp)
+de <- as.data.frame(de)
+de$node <- c(seq(1:length(de$de)))
+dd<-aggregate(rep.int(1, length(de$node))~de$de, FUN=sum)
+names(dd)<-c("val","freq")
+
+ggplot()+
+  geom_point(data = dd, aes(x = val,y = freq),color="red")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  #ggtitle("Degree Distribution of Drosophila Protein Network")+
+  labs(x="node degree", y="frequency of degree")+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("degree_distribution_drosophila_signed_network.pdf", width = 7,height = 11,units = "cm",plot = last_plot(), device = "pdf", dpi = 300,path = "Figures/")
+
+```
+
+Plot of the network.
+
+```{r, echo=FALSE}
+layg <- layout.circle(gcomp)
+V(gcomp)$coord1 <-layg[ ,1]     ## network plots
+V(gcomp)$coord2 <-layg[ ,2]
+
+plot(gcomp, 
+     layout=layg,
+     vertex.shape="circle", 
+     vertex.size=0.0095, 
+     vertex.color=V(gcomp)$color,  
+     vertex.frame.color=V(gcomp)$color,
+     vertex.label=NA, 
+     #vertex.label.cex = vcount(g)*0.00004,
+     #vertex.label.color ="black", 
+     #edge.color=E(gcomp)$color,
+     edge.width=0.03, 
+     edge.arrow.size = 0.00001,
+     edge.arrow.width = 0.0000005,
+     #edge.label=round(x = E(g)$weight,digits = 3), 
+     #edge.label.cex = 0.3,
+     #edge.label.color = E(g)$color,
+     margin = 0,
+     main = "",
+     sub = "")
+title(main = paste("Drosophila signed PPI network "), cex.main= 1.5, cex.sub = 1.2,outer = F)
+
+
+```
+
+## Centralities
+
+We calculate degree, betweenness, closeness, local and global transitivity without the weights and with their absolute value and then we compare them in respect to gene essentiality.
+
+```{r}
+##### without weights
+V(gcomp)$degree <- igraph::degree(gcomp)
+V(gcomp)$betweenness <- igraph::betweenness(gcomp,weights = NA,directed = F)
+V(gcomp)$closeness_all <- igraph::closeness(gcomp,weights = NA, mode = "all")
+V(gcomp)$closeness_in <- igraph::closeness(gcomp,weights = NA, mode = "in")
+V(gcomp)$closeness_out <- igraph::closeness(gcomp,weights = NA, mode = "out")
+V(gcomp)$transitivity_l <- igraph::transitivity(gcomp,type = "local",weights = NA)
+V(gcomp)$transitivity_g <- igraph::transitivity(gcomp,type = "global",weights = NA)
+
+##### with abs weights
+
+V(gcomp)$abs_strength <- igraph::strength(gcomp, weights = E(gcomp)$abs_weights)
+V(gcomp)$w_abs_betweenness <- igraph::betweenness(gcomp,weights = E(gcomp)$abs_weights)
+V(gcomp)$w_abs_closeness <- igraph::closeness(gcomp,weights = E(gcomp)$abs_weights)
+V(gcomp)$w_abs_transitivity_l <- igraph::transitivity(gcomp,type = "local",weights = E(gcomp)$abs_weights)
+V(gcomp)$w_abs_transitivity_g <- igraph::transitivity(gcomp,type = "global",weights = E(gcomp)$abs_weights)
+
+
+#### with the signed normalised weights
+
+V(gcomp)$strength <- igraph::strength(gcomp,weights = E(gcomp)$norm_weights)
+V(gcomp)$w_transitivity_l <- igraph::transitivity(gcomp,type = "local",weights = E(gcomp)$norm_weights)
+V(gcomp)$w_transitivity_g <- igraph::transitivity(gcomp,type = "global",weights = E(gcomp)$norm_weights)
+
+
+gcomp_attributes <- sapply(igraph::list.vertex.attributes(gcomp),function(x) igraph::get.vertex.attribute(gcomp,x))
+
+gcomp_attributes <- as.data.frame(gcomp_attributes)
+gcomp_attributes[,4] <- as.numeric(as.character(gcomp_attributes[,4]))
+gcomp_attributes[,5] <- as.numeric(as.character(gcomp_attributes[,5]))
+gcomp_attributes[,6] <- as.numeric(as.character(gcomp_attributes[,6]))
+gcomp_attributes[,7] <- as.numeric(as.character(gcomp_attributes[,7]))
+gcomp_attributes[,8] <- as.numeric(as.character(gcomp_attributes[,8]))
+gcomp_attributes[,9] <- as.numeric(as.character(gcomp_attributes[,9]))
+gcomp_attributes[,10] <- as.numeric(as.character(gcomp_attributes[,10]))
+gcomp_attributes[,11] <- as.numeric(as.character(gcomp_attributes[,11]))
+gcomp_attributes[,12] <- as.numeric(as.character(gcomp_attributes[,12]))
+gcomp_attributes[,13] <- as.numeric(as.character(gcomp_attributes[,13]))
+gcomp_attributes[,14] <- as.numeric(as.character(gcomp_attributes[,14]))
+gcomp_attributes[,15] <- as.numeric(as.character(gcomp_attributes[,15]))
+gcomp_attributes[,16] <- as.numeric(as.character(gcomp_attributes[,16]))
+gcomp_attributes[,17] <- as.numeric(as.character(gcomp_attributes[,17]))
+gcomp_attributes[,18] <- as.numeric(as.character(gcomp_attributes[,18]))
+gcomp_attributes[,19] <- as.numeric(as.character(gcomp_attributes[,19]))
+gcomp_attributes[,20] <- as.numeric(as.character(gcomp_attributes[20]))
+gcomp_attributes[,21] <- with(gcomp_attributes, ifelse(essentiality.consensus=="Essential",1,0))
+colnames(gcomp_attributes)[21] <- "labels" # for the evaluation methods
+
+```
+
+## Centralities from Antoniou
+
+```{r}
+drosophila_degreesA <- read_excel("Data/Antoniou_degree_out30.xlsx")
+drosophila_degreesA <- as.data.frame(drosophila_degreesA)
+dros_essential2 <- dros_essential[,c(1,6)]
+
+write.table(x = dros_essential2, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/dros_essential2.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+drosophila_degreesA <- left_join(x = drosophila_degreesA, y = dros_essential2, by=c("label"="locus"))
+
+
+drosophila_degreesA$labels <- with(drosophila_degreesA, ifelse(essentiality.consensus=="Essential",1,0))
+
+```
+
+Box plots of centralities.
+
+```{r, echo=FALSE} 
+### Box plots without weights
+
+boxplot_degree <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = degree ,color=essentiality.consensus))+
+  labs(x="Gene consesus", y= "Gene Degree")+
+  guides(color=FALSE)+
+  theme_bw()
+
+boxplot_betweenness <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = betweenness, color=essentiality.consensus))+
+  labs(x="Gene consesus", y= "Gene betweenness")+
+  guides(color=FALSE)+
+  theme_bw()
+
+boxplot_closeness_all <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = closeness_all,color=essentiality.consensus))+
+  labs(x="Gene consesus", y= "Gene all closeness")+
+  guides(color=FALSE)+
+  theme_bw()
+
+boxplot_closeness_in <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = closeness_in,color=essentiality.consensus))+
+  labs(x="Gene consesus", y= "Gene in closeness")+
+  guides(color=FALSE)+
+  theme_bw()
+
+boxplot_closeness_out <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = closeness_out,color=essentiality.consensus))+
+  labs(x="Gene consesus", y= "Gene out closeness")+
+  guides(color=FALSE)+
+  theme_bw()
+
+boxplot_transitivity_local <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = transitivity_l,color=essentiality.consensus))+
+  labs(x="Gene consesus", y= "Gene local transitivity")+
+  guides(color=FALSE)+
+  theme_bw()
+
+
+grid_centralies_drosoplila_network <- grid.arrange(boxplot_degree,boxplot_betweenness,boxplot_closeness_all,boxplot_closeness_in,boxplot_closeness_out, boxplot_transitivity_local, ncol=2,top ="Boxplot of centralities without weights")
+
+grid_centralies_drosoplila_network
+ggsave("grid_centralies_drosoplila_network.pdf", plot = grid_centralies_drosoplila_network, device = "pdf", dpi = 150,path = "Figures/")
+
+rm(grid_centralies_drosoplila_network, boxplot_transitivity_local, boxplot_closeness_out, boxplot_closeness_in, boxplot_closeness_all, boxplot_betweenness, boxplot_degree)
+```
+
+Box plots with absolute values of normalised weights.
+
+```{r, echo=FALSE}
+boxplot_strength <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = abs_strength ,color=essentiality.consensus))+
+  labs(x="Gene consesus", y= "Gene abs Strength")+
+  guides(color=FALSE)+
+  theme_bw()
+
+boxplot_betweenness_abs <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = w_abs_betweenness, color=essentiality.consensus))+
+  guides(color=FALSE)+
+  labs(x="Gene consesus", y= "Gene weighted betweenness")+
+  theme_bw()
+
+boxplot_closeness_abs <- ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = w_abs_closeness,color=essentiality.consensus))+
+  guides(color=FALSE)+
+  labs(x="Gene consesus", y= "Gene closeness")+
+  theme_bw()
+
+grid_centralies_abs_drosoplila_network <- grid.arrange(boxplot_closeness_abs,boxplot_betweenness_abs,boxplot_strength, ncol=2,top ="Boxplot of centralities with absolute weight values")
+
+grid_centralies_abs_drosoplila_network
+ggsave("grid_centralies_abs_drosoplila_network.pdf", plot = grid_centralies_abs_drosoplila_network, device = "pdf", dpi = 150,path = "Figures/")
+
+rm(grid_centralies_abs_drosoplila_network, boxplot_strength, boxplot_betweenness_abs, boxplot_betweenness_abs, boxplot_closeness_abs)
+
+```
+
+With original weights. 
+
+```{r, echo=FALSE,warning=FALSE}
+ggplot()+
+  geom_boxplot(data = gcomp_attributes, 
+               aes(x =essentiality.consensus, y = strength ,color=essentiality.consensus))+
+  #ggtitle("OGEE Drosophila gene essentiality with gene strenth weights")+
+  labs(x="Gene consesus", y= "Gene Strength")+
+  guides(color=FALSE)+
+  theme_bw()
+
+ggsave("strength_essentiality_consensus_drosophila_network_boxplot.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+Scatter plot between gene betweenness and degree in normal - normal and log - log scales. And degree and local transitivity in normal - normal scale.
+
+```{r, echo=FALSE, warning=FALSE}
+
+# Degree and betweenness in normal - normal scale
+scatter_degree_betweenness <- ggplot()+
+  geom_point(data = gcomp_attributes, 
+             aes(x = degree, 
+                 y=betweenness, color=essentiality.consensus),show.legend = TRUE)+
+  geom_smooth()+
+  labs(x="degree", y="betweenness")+
+  #ggtitle("Scatterplot degree betweenness")+
+  theme_bw()
+
+# Degree and betweenness in log - log scale
+scatter_degree_betweenness_log <- ggplot()+
+  geom_point(data = gcomp_attributes, 
+             aes(x = degree, 
+                 y=betweenness, color=essentiality.consensus),show.legend = TRUE)+
+  geom_smooth()+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  labs(x="degree", y="betweenness")+
+  #ggtitle("Scatterplot degree betweenness")+
+  theme_bw()
+
+# Degree and local transitivity
+scatter_degree_transitivity_l <- ggplot()+
+  geom_point(data = gcomp_attributes, 
+             aes(x = degree, 
+                 y=transitivity_l, color=essentiality.consensus),show.legend = TRUE)+
+  geom_smooth()+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  labs(x="degree", y="transitivity_l")+
+  #ggtitle("Scatterplot degree transitivity_l")+
+  theme_bw()
+
+grid_scatterplots_centralities_drosophila_network <- grid.arrange(scatter_degree_betweenness,scatter_degree_betweenness_log,scatter_degree_transitivity_l, ncol=2,top ="Scatterplots of values of centralities")
+
+grid_scatterplots_centralities_drosophila_network
+ggsave("grid_scatterplots_centralities_drosophila_network.pdf", plot = grid_scatterplots_centralities_drosophila_network, device = "pdf", dpi = 150,path = "Figures/")
+
+rm(scatter_degree_betweenness, scatter_degree_betweenness_log, scatter_degree_transitivity_l, grid_scatterplots_centralities_drosophila_network)
+
+```
+
+## Comparing singed network with all network
+
+
+```{r}
+library(AnnotationDbi)
+library(org.Dm.eg.db)
+
+## Find different IDs of Drosophila
+
+x <- org.Dm.egFLYBASE
+# Get the entrez gene identifiers that are mapped to a Flybase ID
+mapped_genes <- mappedkeys(x)
+
+flybase_to_entrez <- as.list(x[mapped_genes])
+sum(sapply(X = flybase_to_entrez,FUN = length))== length(flybase_to_entrez) # it's true so the list has 1 element in every cell of the list. 
+
+flybase_to_entrez_df <- as.data.frame(do.call(rbind,flybase_to_entrez))
+flybase_to_entrez_df <- tibble::rownames_to_column(df = flybase_to_entrez_df,var = "Entrez_ID")
+
+
+dros_biogrid_edgelist <- read_delim(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Data/BIOGRID-ORGANISM-Drosophila_melanogaster-3.4.148.tab2.txt",delim = "\t",col_names = T)
+
+dros_biogrid_edgelist <- dros_biogrid_edgelist %>% filter(`Experimental System Type`=="physical") 
+dros_biogrid_edgelist$`Entrez Gene Interactor A` <- as.character(dros_biogrid_edgelist$`Entrez Gene Interactor A`)
+dros_biogrid_edgelist$`Entrez Gene Interactor B` <- as.character(dros_biogrid_edgelist$`Entrez Gene Interactor B`)
+
+dros_biogrid_edgelist_flybase <- dros_biogrid_edgelist %>% left_join(., flybase_to_entrez_df,by=c("Entrez Gene Interactor A"="Entrez_ID")) %>% left_join(., flybase_to_entrez_df,by=c("Entrez Gene Interactor B"="Entrez_ID")) %>% dplyr::select(V1.x, V1.y) %>% na.omit()
+
+dros_biogrid_g <- graph_from_data_frame(dros_biogrid_edgelist_flybase,directed = F)
+
+dros_biogrid_g_decg<-decompose.graph(dros_biogrid_g, min.vertices = 10) #upografima tis megalis sinistosas 
+dros_biogrid_gcomp<-dros_biogrid_g_decg[[1]]
+
+dros_biogrid_gcomp <- igraph::simplify(dros_biogrid_gcomp)
+
+V(dros_biogrid_gcomp)$Degree <- igraph::degree(dros_biogrid_gcomp)
+V(dros_biogrid_gcomp)$Betweenness <- igraph::betweenness(dros_biogrid_gcomp)
+V(dros_biogrid_gcomp)$Closeness <- igraph::closeness(dros_biogrid_gcomp)
+
+
+dros_biogrid_gcomp_attributes <- as.data.frame(sapply(igraph::list.vertex.attributes(dros_biogrid_gcomp),function(x) igraph::get.vertex.attribute(dros_biogrid_gcomp,x)))
+
+dros_biogrid_gcomp_attributes$Degree <- as.numeric(as.character(dros_biogrid_gcomp_attributes$Degree))
+dros_biogrid_gcomp_attributes$Betweenness <- as.numeric(as.character(dros_biogrid_gcomp_attributes$Betweenness))
+dros_biogrid_gcomp_attributes$Closeness <- as.numeric(as.character(dros_biogrid_gcomp_attributes$Closeness))
+
+dros_biogrid_gcomp_attributes <- dros_biogrid_gcomp_attributes %>% left_join(., dros_essential,by=c("name"="locus"))
+
+dros_biogrid_gcomp_attributes$labels <- with(dros_biogrid_gcomp_attributes, ifelse(essentiality.consensus=="Essential",1,0)) # for the evaluation methods
+
+
+ 
+```
+
+```{r, echo=FALSE}
+ dros_biogrid_gcomp_attributes_degree_dist <- dros_biogrid_gcomp_attributes %>% group_by(Degree) %>% summarise(n=n())
+
+ggplot()+
+  geom_point(data = dd, aes(x = val,y = freq,color="Signed PPI"))+
+  geom_point(data = dros_biogrid_gcomp_attributes_degree_dist, aes(x = Degree,y = n,color="All PPI"))+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  scale_color_manual(values = c("All PPI"="black", "Signed PPI"="red"), name="Networks")+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  #ggtitle("Degree Distribution of Drosophila Protein Network")+
+  labs(x="node degree", y="frequency of degree")+
+  theme_bw()+
+  theme(legend.position = c(0.8,0.88))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+ggsave("degree_distribution_drosophila_network.pdf", width = 11,height = 14,units = "cm",plot = last_plot(), device = "pdf", dpi = 300,path = "Figures/")
+```
+
+
+## Decision trees
+
+We test the application of decision trees on the centrality indices to predict essentiality. It has been reported that integrated methods are more accurate than any single ones. 
+
+Here we apply 3 different algorithms: 
+
+1. The C5.0 algorithm from the C50 package
+2. the rpart package algorithm
+3. the C4.5 algorithm from the RWeka package
+
+From these the C5.0 is considered the most reliable and accepted method for decision trees construction.
+
+```{r}
+
+#jdk-8u121-macosx-x64.dmg
+#in command line :sudo R CMD javareconf
+#install.packages("rJava",type='source')
+#install.packages("RWeka")
+#http://justrocketscience.com/post/install-rweka-mac
+# after it is still broken
+# follow the instructions http://charlotte-ngs.github.io/2016/01/MacOsXrJavaProblem.html
+# in RStudio change the folder to jdk1.8.0_121.jdk because now there is a new version available!! 
+# continue the instructions
+
+library(rpart)
+library("rpart.plot")
+#library(rJava)
+library(RWeka)
+library(C50)
+
+####
+drosophila_degreesA2 <- drosophila_degreesA[,-c(56,57)]
+
+gcomp_attributes_tree1 <- left_join(gcomp_attributes,drosophila_degreesA2, by=c("name"="label")) %>% dplyr::select(-c(1,3,4,5,6,11,12,16,17,19,20,21)) %>% na.omit(.) %>% mutate(essentiality.consensus=as.factor(ifelse(essentiality.consensus=="Essential","Essential", "Nonessential")))
+
+# Decision tree C50
+
+# fit model
+fit <- C5.0(essentiality.consensus~., data=gcomp_attributes_tree1)
+# summarize the fit
+print(fit)
+# make predictions
+predictions <- predict(fit, gcomp_attributes_tree1)
+
+predictions_probs <- predict(fit, gcomp_attributes_tree1,type = "prob")
+
+# summarize accuracy
+predictions_table_C50 <- as.data.frame(table(predictions, gcomp_attributes_tree1$essentiality.consensus))
+
+# Consolidate objects
+gcomp_attributes_tree <- cbind(gcomp_attributes_tree1,predictions_probs) 
+
+gcomp_attributes_tree <- gcomp_attributes_tree %>% mutate(labels=as.factor(ifelse(essentiality.consensus=="Essential",1,0)))
+
+plot(fit)
+
+pdf(file = "Figures/Decision_tree_C5_0.pdf")
+plot(fit, trial=1)
+dev.off()
+
+```
+
+From the rpart package we get the very similar results. There only two branches in the tree.
+
+```{r}
+
+# Decision tree rpart
+
+fit_rpart <- rpart(essentiality.consensus~., data=gcomp_attributes_tree1, method = "class")
+
+
+pdf(file = "Figures/Decision_tree_rpart.pdf")
+rpart.plot(fit_rpart)
+dev.off()
+
+rpart.plot(fit_rpart)
+
+# make predictions
+predictions <- predict(fit_rpart, type = "class")
+
+predictions_table_rpart <- as.data.frame(table(predictions, gcomp_attributes_tree1$essentiality.consensus))
+
+predictions_probs_rpart <- as.data.frame(predict(fit_rpart, gcomp_attributes_tree1,type = "prob"))
+colnames(predictions_probs_rpart) <- c("Essential_rpart", "Nonessential_part")
+
+gcomp_attributes_tree <- cbind(gcomp_attributes_tree,predictions_probs_rpart) 
+
+```
+
+The J48 function of the RWeka package a more detailed tree.
+
+```{r}
+# Decision tree J48 function RWeka
+tree_rweka <- J48(essentiality.consensus~., data=gcomp_attributes_tree1)
+
+predictions <- predict(tree_rweka, type="class")
+
+# probabilities
+tree_rweka_pred <- as.data.frame(predict(tree_rweka, type = "prob"))
+colnames(tree_rweka_pred) <- c("Essential_rweka", "Nonessential_rweka")
+
+gcomp_attributes_tree <- cbind(gcomp_attributes_tree,tree_rweka_pred) 
+
+# confusion matrix
+table_tree_rweka <- as.data.frame(table(predictions, gcomp_attributes_tree1$essentiality.consensus))
+
+# plotting
+plot(tree_rweka)
+
+pdf(file = "Figures/Decision_tree_RWeka.pdf")
+plot(tree_rweka)
+dev.off()
+```
+
+The confusion matrix of the results of the 3 algorithms. 
+
+```{r, warning=FALSE, echo=FALSE}
+
+predictions_table_C50_f <- predictions_table_C50 %>% mutate(Predicted_condition=if_else((predictions=="Essential" & Var2=="Essential"), "True positives",if_else((predictions=="Essential" & Var2=="Nonessential"),"False positives", if_else((predictions=="Nonessential" & Var2=="Essential"), "False negatives","True negatives")))) %>% dplyr::rename(.,C5.0 = Freq) %>% dplyr::select(Predicted_condition, C5.0)
+
+predictions_table_rpart_f <- predictions_table_rpart %>% mutate(Predicted_condition=if_else((predictions=="Essential" & Var2=="Essential"), "True positives",if_else((predictions=="Essential" & Var2=="Nonessential"),"False positives", if_else((predictions=="Nonessential" & Var2=="Essential"), "False negatives","True negatives")))) %>% dplyr::rename(rpart=Freq) %>% dplyr::select(Predicted_condition, rpart)
+
+table_tree_rweka_f <- table_tree_rweka %>% mutate(Predicted_condition=if_else((predictions=="Essential" & Var2=="Essential"), "True positives",if_else((predictions=="Essential" & Var2=="Nonessential"),"False positives", if_else((predictions=="Nonessential" & Var2=="Essential"), "False negatives","True negatives")))) %>% dplyr::rename(C4.5_RWeka=Freq) %>% dplyr::select(Predicted_condition, C4.5_RWeka)
+
+confusion_matrix_trees <- predictions_table_C50_f %>% left_join(.,predictions_table_rpart_f , by=c("Predicted_condition"="Predicted_condition")) %>% left_join(.,table_tree_rweka_f , by=c("Predicted_condition"="Predicted_condition"))
+
+
+write.table(x = confusion_matrix_trees, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/confusion_matrix_trees.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+caption_confusion_matrix_trees <- "Confusion matrix of the 3 different algorithms used for the decision trees"
+kable(confusion_matrix_trees,caption=caption_confusion_matrix_trees, align = 'c', format="latex")
+
+```
+
+
+## Method comparison
+
+
+The *Drosophila melanogaster* network used herein contains 154 essential genes. In order evaluate each centrality index that we used as a predictor of gene essentiality we isolate the highest 200 values from each centrality. Then we label each case if it was correctly predicted as essential or not. 
+
+```{r, warning=FALSE,message=FALSE}
+# Get data ready
+
+essentiality_number <- drosophila_degreesA %>% filter(!essentiality.consensus=="Nonessential") %>% nrow()
+
+#Degree
+degree_roc <- gcomp_attributes[,c(6,21)]
+colnames(degree_roc)[1] <- "predictions"
+degree_roc <- head(arrange(degree_roc, desc(predictions)), n=essentiality_number) # top 200. 
+degree_roc <- degree_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+#Betweenness
+between_roc <- gcomp_attributes[,c(7,21)]
+colnames(between_roc)[1] <- "predictions"
+between_roc <- head(arrange(between_roc, desc(predictions)), n=essentiality_number) # top 200. 
+between_roc <- between_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+# Abs weight Betweenness
+w_between_roc <- gcomp_attributes[,c(14,21)]
+colnames(w_between_roc)[1] <- "predictions"
+w_between_roc <- head(arrange(w_between_roc, desc(predictions)), n=essentiality_number) # top 200. 
+w_between_roc <- w_between_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+# Closeness
+close_roc <- gcomp_attributes[,c(8,21)]
+colnames(close_roc)[1] <- "predictions"
+close_roc <- head(arrange(close_roc, desc(predictions)), n=essentiality_number) # top 200. 
+close_roc <- close_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+# Information Degree Centrality
+information_degree_centr_roc <- drosophila_degreesA[,c(37,57)]
+colnames(information_degree_centr_roc)[1] <- "predictions"
+information_degree_centr_roc <- head(arrange(information_degree_centr_roc,desc(predictions)),n=essentiality_number)
+information_degree_centr_roc <- information_degree_centr_roc %>% filter(!labels=="NA")
+
+# Information Degree
+information_degree_roc <- drosophila_degreesA[,c(10,57)]
+colnames(information_degree_roc)[1] <- "predictions"
+information_degree_roc <- head(arrange(information_degree_roc, desc(predictions)),n=essentiality_number)
+information_degree_roc <- information_degree_roc %>% filter(!labels=="NA")
+
+#Decision tree C50
+tree_C50_roc <- gcomp_attributes_tree[,c(64,66)]
+colnames(tree_C50_roc)[1] <- "predictions"
+tree_C50_roc <- head(arrange(tree_C50_roc, desc(predictions)), n=essentiality_number) # top 200. 
+tree_C50_roc <- tree_C50_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+#Decision tree rpart
+tree_rpart_roc <- gcomp_attributes_tree[,c(67,66)]
+colnames(tree_rpart_roc)[1] <- "predictions"
+tree_rpart_roc <- head(arrange(tree_rpart_roc, desc(predictions)), n=essentiality_number) # top 200. 
+tree_rpart_roc <- tree_rpart_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+#Decision tree C4.5
+tree_C45_roc <- gcomp_attributes_tree[,c(69,66)]
+colnames(tree_C45_roc)[1] <- "predictions"
+tree_C45_roc <- head(arrange(tree_C45_roc, desc(predictions)), n=essentiality_number) # top 200. 
+tree_C45_roc <- tree_C45_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+# Degree all dros
+
+all_dros_degree_roc <- dros_biogrid_gcomp_attributes[,c(2,10)]
+colnames(all_dros_degree_roc)[1] <- "predictions"
+all_dros_degree_roc <- head(arrange(all_dros_degree_roc, desc(predictions)), n=essentiality_number) # top 200. 
+all_dros_degree_roc <- all_dros_degree_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+# Betweenness all dros
+
+all_dros_Betweenness_roc <- dros_biogrid_gcomp_attributes[,c(3,10)]
+colnames(all_dros_Betweenness_roc)[1] <- "predictions"
+all_dros_Betweenness_roc <- head(arrange(all_dros_Betweenness_roc, desc(predictions)), n=essentiality_number) # top 200. 
+all_dros_Betweenness_roc <- all_dros_Betweenness_roc %>% filter(!labels=="NA") #remove rows if essentiality consesus==NA
+
+
+```
+
+### Precision Recall Curve
+
+We will use standard methods for the evaluation of the predicted power of centralities. The Precision Recall curve is a comprehensive visualization for the trade-offs of precision as we increase recall. Precision is defined as: 
+
+$$
+\text{Precision}= \dfrac{\text{True Positive}}{\text{True Positive} + \text{False Positive}}
+$$
+It represents the fraction of the predicted cases that were correct. On the contrary recall is the fraction of predicted cases in respect to all correct cases. Recall is defined as: 
+
+$$
+\text{Recall}= \dfrac{\text{True Positive}}{\text{True Positive} + \text{False Negative}}
+$$
+
+```{r, warning=FALSE,message=FALSE}
+library(ROCR)
+
+# Precision Recall
+# Degree
+pred_deg <- prediction(degree_roc$predictions,degree_roc$labels)
+perf_deg <- performance(pred_deg,"prec", "rec")
+df_roc_deg <- cbind(perf_deg@x.values[[1]],perf_deg@y.values[[1]])
+df_roc_deg <- as.data.frame(df_roc_deg)
+
+# Betweenness
+pred_bet <- prediction(between_roc$predictions,between_roc$labels)
+perf_bet <- performance(pred_bet,"prec", "rec")
+df_roc_bet <- cbind(perf_bet@x.values[[1]],perf_bet@y.values[[1]])
+df_roc_bet <- as.data.frame(df_roc_bet)
+
+# Absolute weights betweenness
+w_pred_bet <- prediction(w_between_roc$predictions,w_between_roc$labels)
+w_perf_bet <- performance(w_pred_bet,"prec", "rec")
+w_df_roc_bet <- cbind(w_perf_bet@x.values[[1]],w_perf_bet@y.values[[1]])
+w_df_roc_bet <- as.data.frame(w_df_roc_bet)
+
+# Closeness
+pred_close <- prediction(close_roc$predictions,close_roc$labels)
+perf_close <- performance(pred_close,"prec", "rec")
+df_roc_close <- cbind(perf_close@x.values[[1]],perf_close@y.values[[1]])
+df_roc_close <- as.data.frame(df_roc_close)
+
+# Information degree centrality
+pred_inf_cent <- prediction(information_degree_centr_roc$predictions,information_degree_centr_roc$labels)
+perf_inf_cent <- performance(pred_inf_cent,"prec", "rec")
+df_roc_inf_cent <- cbind(perf_inf_cent@x.values[[1]],perf_inf_cent@y.values[[1]])
+df_roc_inf_cent <- as.data.frame(df_roc_inf_cent)
+
+# Information degree
+pred_inf_d <- prediction(information_degree_roc$predictions, information_degree_roc$labels)
+perf_inf_d <- performance(pred_inf_d, "prec", "rec")
+df_roc_inf_d <- cbind(perf_inf_d@x.values[[1]], perf_inf_d@y.values[[1]])
+df_roc_inf_d <- as.data.frame(df_roc_inf_d)
+
+# Decision tree C50
+pred_treeC50_d <- prediction(tree_C50_roc$predictions, tree_C50_roc$labels)
+perf_treeC50_d <- performance(pred_treeC50_d, "prec", "rec")
+df_roc_treeC50_d <- cbind(perf_treeC50_d@x.values[[1]], perf_treeC50_d@y.values[[1]])
+df_roc_treeC50_d <- as.data.frame(df_roc_treeC50_d)
+
+# Decision tree rpart
+pred_tree_rpart_d <- prediction(tree_rpart_roc$predictions, tree_rpart_roc$labels)
+perf_tree_rpart_d <- performance(pred_tree_rpart_d, "prec", "rec")
+df_roc_tree_rpart_d <- cbind(perf_tree_rpart_d@x.values[[1]], perf_tree_rpart_d@y.values[[1]])
+df_roc_tree_rpart_d <- as.data.frame(df_roc_tree_rpart_d)
+
+# Decision tree C50
+pred_treeC45_d <- prediction(tree_C45_roc$predictions, tree_C45_roc$labels)
+perf_treeC45_d <- performance(pred_treeC45_d, "prec", "rec")
+df_roc_treeC45_d <- cbind(perf_treeC45_d@x.values[[1]], perf_treeC45_d@y.values[[1]])
+df_roc_treeC45_d <- as.data.frame(df_roc_treeC45_d)
+
+# all dros degree
+pred_all_dros_degree_roc_d <- prediction(all_dros_degree_roc$predictions, all_dros_degree_roc$labels)
+perf_all_dros_degree_roc_d <- performance(pred_all_dros_degree_roc_d, "prec", "rec")
+df_roc_all_dros_degree_d <- cbind(perf_all_dros_degree_roc_d@x.values[[1]], perf_all_dros_degree_roc_d@y.values[[1]])
+df_roc_all_dros_degree_d <- as.data.frame(df_roc_all_dros_degree_d)
+
+
+# Precision Recall Curve
+ggplot()+
+  geom_line(data = df_roc_bet, aes(x = V1,y = V2, color="Betweenness" ))+
+  geom_line(data = df_roc_deg, aes(x = V1,y = V2, color="Degree"))+
+  geom_line(data = w_df_roc_bet, aes(x = V1,y = V2, color="Weighted betweenness centrality"))+
+  geom_line(data = df_roc_close, aes(x = V1,y = V2, color="Closeness"))+
+  #geom_line(data = df_roc_inf_cent, aes(x = V1,y = V2, color="Information degree centrality"),position=position_jitter(w=0.02, h=0))+
+  geom_line(data = df_roc_inf_d, aes(x = V1,y = V2, color="Information degree"))+
+  geom_line(data = df_roc_treeC50_d, aes(x = V1,y = V2, color="Decision tree C5.0"),position=position_jitter(w=0.02, h=0))+
+  geom_line(data = df_roc_tree_rpart_d, aes(x = V1,y = V2, color="Decision tree rpart"))+
+  geom_line(data = df_roc_treeC45_d, aes(x = V1,y = V2, color="Decision tree C4.5"))+
+  geom_line(data = df_roc_all_dros_degree_d, aes(x = V1,y = V2, color="Degree in original PPI net"))+
+  scale_colour_manual(values = c("Degree"="red","Betweenness"="green1","Weighted betweenness centrality"="purple", "Closeness"="pink","Information degree centrality"="blue2", "Information degree"="yellow","Decision tree C5.0"="burlywood4", "Decision tree rpart"="dodgerblue", "Decision tree C4.5"="forestgreen", "Degree in original PPI net"="orange2"), name="Methods")+
+  #ggtitle("Precision Recall Curve")+
+  labs(x="Recall", y="Precision")+
+  theme_bw()+
+  coord_fixed(ratio = 1)+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+ggsave("Centralities_Precision_Recall_Curve.pdf", plot = last_plot(),width = 17,height = 10,units = "cm", device = "pdf", dpi = 300,path = "Figures/")
+```
+
+### ROC Curve
+
+```{r, warning=FALSE,message=FALSE}
+
+# ROC curve
+
+# Degree
+ROC_degree <- performance(pred_deg, "tpr", "fpr")
+ROC_degree_d <- cbind(ROC_degree@x.values[[1]],ROC_degree@y.values[[1]])
+ROC_degree_d <- as.data.frame(ROC_degree_d)
+
+# Betweenness
+ROC_bet <- performance(pred_bet, "tpr", "fpr")
+ROC_bet_d <- cbind(ROC_bet@x.values[[1]],ROC_bet@y.values[[1]])
+ROC_bet_d <- as.data.frame(ROC_bet_d)
+
+# Abs weights betweenneess
+ROC_w_bet <- performance(w_pred_bet, "tpr", "fpr")
+ROC_w_bet_d <- cbind(ROC_w_bet@x.values[[1]],ROC_w_bet@y.values[[1]])
+ROC_w_bet_d <- as.data.frame(ROC_w_bet_d)
+
+# Closeness
+ROC_close <- performance(pred_close, "tpr", "fpr")
+ROC_close_d <- cbind(ROC_close@x.values[[1]],ROC_close@y.values[[1]])
+ROC_close_d <- as.data.frame(ROC_close_d)
+
+# Information degree centrality
+ROC_inf_cent <- performance(pred_inf_cent, "tpr", "fpr")
+ROC_inf_cent_d <- cbind(ROC_inf_cent@x.values[[1]],ROC_inf_cent@y.values[[1]])
+ROC_inf_cent_d <- as.data.frame(ROC_inf_cent_d)
+
+# Information degree
+ROC_inf_d <- performance(pred_inf_d, "tpr", "fpr")
+ROC_inf_d_d <- cbind(ROC_inf_d@x.values[[1]],ROC_inf_d@y.values[[1]])
+ROC_inf_d_d <- as.data.frame(ROC_inf_d_d)
+
+# Decision tree C5.0
+ROC_treeC50_d <- performance(pred_treeC50_d, "tpr", "fpr")
+ROC_treeC50_d_d <- cbind(ROC_treeC50_d@x.values[[1]],ROC_treeC50_d@y.values[[1]])
+ROC_treeC50_d_d <- as.data.frame(ROC_treeC50_d_d)
+
+# Decision tree rpart
+ROC_tree_rpart_d <- performance(pred_tree_rpart_d, "tpr", "fpr")
+ROC_tree_rpart_d_d <- cbind(ROC_tree_rpart_d@x.values[[1]],ROC_tree_rpart_d@y.values[[1]])
+ROC_tree_rpart_d_d <- as.data.frame(ROC_tree_rpart_d_d)
+
+# Decision tree C4.5
+ROC_treeC45_d <- performance(pred_treeC45_d, "tpr", "fpr")
+ROC_treeC45_d_d <- cbind(ROC_treeC45_d@x.values[[1]],ROC_treeC45_d@y.values[[1]])
+ROC_treeC45_d_d <- as.data.frame(ROC_treeC45_d_d)
+
+# All dros degree
+ROC_all_dros_degree_d <- performance(pred_all_dros_degree_roc_d, "tpr", "fpr")
+ROC_all_dros_degree_d_d <- cbind(ROC_all_dros_degree_d@x.values[[1]],ROC_all_dros_degree_d@y.values[[1]])
+ROC_all_dros_degree_d_d <- as.data.frame(ROC_all_dros_degree_d_d)
+
+```
+
+### AUC
+
+Afterwards we have to calculate a specific metric like the F-measure and AUC.
+```{r, echo=FALSE}
+# ROC area under the curve
+auc_table <- as.data.frame(matrix(0, ncol = 2,nrow = 10))
+
+colnames(auc_table) <- c("Centralities", "AUC")
+
+#Degree
+auc_deg <- performance(pred_deg,"auc")
+auc_deg <- as.numeric(auc_deg@y.values)
+auc_table$Centralities[1] <- "Degree"
+auc_table$AUC[1] <- auc_deg
+
+#Betweenneess
+auc_bet <- performance(pred_bet,"auc")
+auc_bet <- as.numeric(auc_bet@y.values)
+auc_table$Centralities[2] <- "Betweenneess"
+auc_table$AUC[2] <- auc_bet
+
+#Abs weights betweenness
+auc_w_bet <- performance(w_pred_bet,"auc")
+auc_w_bet <- as.numeric(auc_w_bet@y.values)
+auc_table$Centralities[3] <- "Weighted betweenness centrality"
+auc_table$AUC[3] <- auc_w_bet
+
+#Closeness
+auc_close <- performance(pred_close,"auc")
+auc_close <- as.numeric(auc_close@y.values)
+auc_table$Centralities[4] <- "Closeness"
+auc_table$AUC[4] <- auc_close
+
+# # Information degree centrality
+# auc_inf_cent <- performance(pred_inf_cent,"auc")
+# auc_inf_cent <- as.numeric(auc_inf_cent@y.values)
+# auc_table$Centralities[5] <- "Informatio degree centrality"
+# auc_table$AUC[5] <- auc_inf_cent
+
+# Information centrality
+auc_inf_d <- performance(pred_inf_d,"auc")
+auc_inf_d <- as.numeric(auc_inf_d@y.values)
+auc_table$Centralities[6] <- "Information degree"
+auc_table$AUC[6] <- auc_inf_d
+
+# Decision tree C5.0
+auc_treeC50_d <- performance(pred_treeC50_d,"auc")
+auc_treeC50_d <- as.numeric(auc_treeC50_d@y.values)
+auc_table$Centralities[7] <- "Decision tree C5.0"
+auc_table$AUC[7] <- auc_treeC50_d
+
+# Decision tree rpart
+auc_tree_rpart_d <- performance(pred_tree_rpart_d,"auc")
+auc_tree_rpart_d <- as.numeric(auc_tree_rpart_d@y.values)
+auc_table$Centralities[8] <- "Decision tree rpart"
+auc_table$AUC[8] <- auc_tree_rpart_d
+
+# Decision tree C4.5
+auc_treeC45_d <- performance(pred_treeC45_d,"auc")
+auc_treeC45_d <- as.numeric(auc_treeC45_d@y.values)
+auc_table$Centralities[9] <- "Decision tree C4.5"
+auc_table$AUC[9] <- auc_treeC45_d
+
+
+# all dros degree 
+auc_all_dros_degree_d <- performance(pred_all_dros_degree_roc_d,"auc")
+auc_all_dros_degree_d <- as.numeric(auc_all_dros_degree_d@y.values)
+auc_table$Centralities[10] <- "Degree in all PPI net of drosophila"
+auc_table$AUC[10] <- auc_all_dros_degree_d
+
+
+# Check for zero entries
+
+auc_table <- auc_table[!(auc_table$Centralities==0),]
+#F1-score 
+f1_score <- performance(pred_deg,"f")
+
+```
+
+
+```{r, echo=FALSE}
+auc_table$AUC <- round(auc_table$AUC,digits = 3)
+
+caption_auc_table <- "AUC score of the different centralities as essentiality predictors"
+kable(auc_table,caption=caption_auc_table, align = 'c', format="latex",row.names = F)
+
+write.table(x = auc_table, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/Auc_table.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+```{r, echo=FALSE}
+# ROC curve plot
+
+ggplot()+
+  geom_abline(slope=1,linetype="dotted")+
+  geom_line(data = ROC_bet_d, aes(x = V1,y = V2, color="Betweenness, 0.609" ))+
+  geom_line(data = ROC_degree_d, aes(x = V1,y = V2, color="Degree, 0.804"))+
+  geom_line(data = ROC_w_bet_d, aes(x = V1,y = V2, color="Weighted betweenness centrality, 0.620"))+
+  geom_line(data = ROC_close_d, aes(x = V1,y = V2, color="Closeness, 0.673"))+
+  #geom_line(data = ROC_inf_cent_d, aes(x = V1,y = V2, color="Information degree centrality"))+
+  geom_line(data = ROC_inf_d_d, aes(x = V1,y = V2, color="Information degree, 0.539"))+
+  geom_line(data = ROC_treeC50_d_d, aes(x = V1,y = V2, color="Decision tree C5.0, 0.867"),position=position_jitter(w=0.01, h=0.01))+
+  geom_line(data = ROC_tree_rpart_d_d, aes(x = V1,y = V2, color="Decision tree rpart, 0.881"),position=position_jitter(w=-0.01, h=-0.01))+
+  geom_line(data = ROC_treeC45_d_d, aes(x = V1,y = V2, color="Decision tree C4.5, 0.874"))+
+  geom_line(data = ROC_all_dros_degree_d_d, aes(x = V1,y = V2, color="Degree in original PPI net, 0.435"))+
+  scale_colour_manual(values = c("Degree, 0.804"="red","Betweenness, 0.609"="green1","Weighted betweenness centrality, 0.620"="purple", "Closeness, 0.673"="pink", "Information degree centrality"="blue1","Information degree, 0.539"="yellow","Decision tree C5.0, 0.867"="burlywood4", "Decision tree rpart, 0.881"="dodgerblue", "Decision tree C4.5, 0.874"="forestgreen", "Degree in original PPI net, 0.435"="orange2"), name="Methods and AUC")+
+  #ggtitle("ROC Curve")+
+  labs(x="False Positive Rate", y="True Positive Rate")+
+  theme_bw()+
+  coord_fixed(ratio = 1)+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Centralities_ROC_Curve.pdf", plot = last_plot(),width = 17,height = 10,units = "cm", device = "pdf", dpi = 300,path = "Figures/")
+```
+
+
+### Top values of centralities
+
+Another visual method to evaluate the centralities is to plot the number of top values of centrality against the number of essential proteins within. This is a simple and intuitive illustration of the raw predictive power of the centralities.
+
+```{r}
+# top proteins based on centrality versus the predicted essential proteins
+max_top <- 200 # has to be higher than the total essential genes
+
+sorted_attributes_degree <- with(gcomp_attributes,gcomp_attributes[order(degree,decreasing = T),]) # Sort data frame based on a column
+sorted_attributes_betweenness <- with(gcomp_attributes,gcomp_attributes[order(betweenness,decreasing = T),])
+sorted_attributes_closeness <- with(gcomp_attributes,gcomp_attributes[order(closeness_all,decreasing = T),])
+sorted_attributes_w_abs_betweenness <- with(gcomp_attributes,gcomp_attributes[order(w_abs_betweenness,decreasing = T),])
+sorted_attributes_information_cent <- with(drosophila_degreesA,drosophila_degreesA[order(drosophila_degreesA[,37],decreasing = T),])
+sorted_attributes_information_degree <- with(drosophila_degreesA,drosophila_degreesA[order(drosophila_degreesA[,10],decreasing = T),])
+
+sorted_attributes_decision_tree <- with(gcomp_attributes_tree,gcomp_attributes_tree[order(gcomp_attributes_tree[,64],decreasing = T),])
+
+sorted_attributes_decision_tree_rpart <- with(gcomp_attributes_tree,gcomp_attributes_tree[order(gcomp_attributes_tree[,67],decreasing = T),])
+
+sorted_attributes_decision_tree_C45 <- with(gcomp_attributes_tree,gcomp_attributes_tree[order(gcomp_attributes_tree[,69],decreasing = T),])
+sorted_attributes_alls_dros_degree <- with(dros_biogrid_gcomp_attributes,dros_biogrid_gcomp_attributes[order(dros_biogrid_gcomp_attributes[,2],decreasing = T),])
+
+top_essential <- as.data.frame(matrix(ncol = 1,nrow = max_top))
+n_essentials <- length(which(!gcomp_attributes$essentiality.consensus=="Nonessential"))
+top_essential[,1] <- c(1:n_essentials, rep(n_essentials, max_top-n_essentials))
+
+for(i in 1:max_top){
+  
+  head_sort_degree <- head(sorted_attributes_degree,n = i)
+  head_sort_bet <- head(sorted_attributes_betweenness,n = i)
+  head_sort_close <- head(sorted_attributes_closeness,n = i)
+  head_sort_w_abs_betweenness <- head(sorted_attributes_w_abs_betweenness,n = i)
+  head_sorted_information_cent <- head(sorted_attributes_information_cent,n=i)
+  head_sorted_information_degree <- head(sorted_attributes_information_degree, n=i)
+  head_sorted_attributes_decision_tree <- head(sorted_attributes_decision_tree,n=i)
+  head_sorted_attributes_decision_tree_rpart <- head(sorted_attributes_decision_tree_rpart,n=i)
+  head_sorted_attributes_decision_tree_C45 <- head(sorted_attributes_decision_tree_C45,n=i)
+  head_sorted_attributes_all_dros_degree <- head(sorted_attributes_alls_dros_degree,n=i)
+
+  top_essential[i,2]<- i
+  top_essential[i,3] <- length(which(head_sort_degree$essentiality.consensus=="Essential"))
+  top_essential[i,4] <- length(which(head_sort_bet$essentiality.consensus=="Essential"))
+  top_essential[i,5] <- length(which(head_sort_close$essentiality.consensus=="Essential"))
+  top_essential[i,6] <- length(which(head_sort_w_abs_betweenness$essentiality.consensus=="Essential"))
+  top_essential[i,7] <- length(which(head_sorted_information_cent$essentiality.consensus=="Essential"))
+  top_essential[i,8] <- length(which(head_sorted_information_degree$essentiality.consensus=="Essential"))
+  top_essential[i,9] <- length(which(head_sorted_attributes_decision_tree$essentiality.consensus=="Essential"))
+  top_essential[i,10] <- length(which(head_sorted_attributes_decision_tree_rpart$essentiality.consensus=="Essential"))
+  top_essential[i,11] <- length(which(head_sorted_attributes_decision_tree_C45$essentiality.consensus=="Essential"))
+  top_essential[i,12] <- length(which(head_sorted_attributes_all_dros_degree$essentiality.consensus=="Essential"))
+  
+}
+
+colnames(top_essential) <- c("all_essentials","top_number","essentials_degree","essentials_betweenness","essentials_closeness","abs_weights_betweenness", "information_degree_centrality","information_degree", "decision_tree_C50", "decision_tree_rpart", "decision_tree_C45","all_dros_degree")
+
+```
+
+Let's plot them.
+```{r, echo=FALSE, warning=FALSE}
+ggplot()+
+  geom_line(data = top_essential, aes(x = top_number,y = all_essentials, color="Total essentials"),linetype="dotted")+
+  geom_line(data = top_essential, aes(x = top_number,y = essentials_degree, color="Degree" ))+
+  geom_line(data = top_essential, aes(x = top_number,y = essentials_betweenness, color="Betweenness" ))+
+  geom_line(data = top_essential, aes(x = top_number,y = essentials_closeness, color="Closeness" ))+
+  geom_line(data = top_essential, aes(x = top_number,y = abs_weights_betweenness, color="Weighted betweenness centrality" ))+
+  #geom_line(data = top_essential, aes(x = top_number,y = information_degree_centrality, color="Information degree centrality" ))+
+  geom_line(data = top_essential, aes(x = top_number,y = decision_tree_C50, color="Decision tree C5.0" ))+
+  geom_line(data = top_essential, aes(x = top_number,y = information_degree, color="Information degree" ))+
+  geom_line(data = top_essential, aes(x = top_number,y = decision_tree_rpart, color="Decision tree rpart" ))+
+  geom_line(data = top_essential, aes(x = top_number,y = decision_tree_C45, color="Decision tree C4.5" ))+
+  geom_line(data = top_essential, aes(x = top_number,y = all_dros_degree, color="Degree in original PPI net" ))+
+  scale_x_continuous(breaks = seq(0,175,25),limits = c(0,175))+
+  scale_y_continuous(breaks = seq(0,175,25),limits = c(0,175))+
+  scale_colour_manual(values = c("Total essentials"="black","Degree"="red","Betweenness"="green1","Closeness"="pink","Weighted betweenness centrality"="purple", "Information degree centrality"="blue1", "Information degree"="yellow", "Decision tree C5.0"= "burlywood4", "Decision tree rpart"="dodgerblue", "Decision tree C4.5"="forestgreen","Degree in original PPI net"="orange2"), name="Methods")+
+  #ggtitle("Jackknife curves of essentiality prediction methods")+
+  labs(x="Number of top proteins", y="Essential proteins retrieved")+
+  theme_bw()+
+  coord_fixed(ratio = 1)+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+ggsave("Centralities_Successful_prediction_essentiality.pdf",width = 17,height = 10,units = "cm", plot = last_plot(), device = "pdf", dpi = 300,path = "Figures/")
+
+```
+
+```{r, echo=FALSE}
+
+rm(top_essential,sorted_attributes_information_degree, sorted_attributes_information_cent,sorted_attributes_w_abs_betweenness, sorted_attributes_closeness, sorted_attributes_degree, sorted_attributes_betweenness, max_top)
+
+```
+
+
+
+# Network Decompositions 
+
+## Subnetworks based on essentiality
+We can extract different sub networks based on the essentiality consensus of the nodes. We explored the following instances:
+
+1. essential nodes and their neighbors
+2. only essential nodes
+3. only links between essential nodes
+
+### Essential Nodes and Their Neighbors
+
+```{r}
+# Only essential nodes and their neighbors
+essential_genes_net <- subset(dros_net, ID1_consensus=="Essential"|ID1_consensus=="Conditional"| ID2_consensus=="Essential"|ID2_consensus=="Conditional")
+g_essential_non <- graph_from_data_frame(essential_genes_net, directed = T)
+
+g_essential_non_giant <- decompose.graph(g_essential_non,min.vertices = 10)
+
+g_essential_non_giant <- g_essential_non_giant[[1]]
+
+# layg1 <- layout_nicely(g_essential_non_giant)
+# plot(g_essential_non_giant, 
+#      layout=layg1,
+#      vertex.shape="circle", 
+#      vertex.size=0.295, 
+#      vertex.color=V(g_essential_non)$color,  
+#      vertex.frame.color=V(g_essential_non)$color,
+#      vertex.label=NA, 
+#      #vertex.label.cex = vcount(g)*0.00004,
+#      #vertex.label.color ="black", 
+#      edge.color=E(g_essential_non)$color,
+#      edge.width=0.53, 
+#      edge.arrow.size = 0.31,
+#      edge.arrow.width = 0.5,
+#      #edge.label=round(x = E(g)$weight,digits = 3), 
+#      #edge.label.cex = 0.3,
+#      #edge.label.color = E(g)$color,
+#      margin = 0,
+#      main = "",
+#      sub = "")
+# title(main = paste("Only essential nodes and their neighbors"), cex.main= 1.5, cex.sub = 1.2,outer = F)
+# 
+
+```
+
+```{r, eval=FALSE}
+ggraph_gcomp <- ggraph(gcomp,layout = 'kk') + 
+  geom_edge_link(aes(colour = sign_score_sign)) + 
+  geom_node_point(aes(color=essentiality.consensus))+
+  theme_graph()
+
+```
+
+
+
+### Essential Nodes Links
+
+```{r}
+# only essential nodes
+g_essential <- induced.subgraph(gcomp, which(V(gcomp)$essentiality.consensus=="Essential"|V(gcomp)$essentiality.consensus=="Conditional"))
+
+# layg2 <- layout_nicely(g_essential)
+# 
+# plot(g_essential, 
+#      layout=layg2,
+#      vertex.shape="circle", 
+#      vertex.size=0.295, 
+#      vertex.color=V(g_essential)$color,  
+#      vertex.frame.color=V(g_essential)$color,
+#      vertex.label=NA, 
+#      #vertex.label.cex = vcount(g)*0.00004,
+#      #vertex.label.color ="black", 
+#      edge.color=E(g_essential)$color,
+#      edge.width=0.53, 
+#      edge.arrow.size = 0.31,
+#      edge.arrow.width = 0.5,
+#      #edge.label=round(x = E(g)$weight,digits = 3), 
+#      #edge.label.cex = 0.3,
+#      #edge.label.color = E(g)$color,
+#      margin = 0,
+#      main = "",
+#      sub = "")
+# title(main = paste("Only essential nodes and their neighbors"), cex.main= 1.5, 
+#       cex.sub = 1.2,outer = F)
+
+```
+
+```{r, warning=FALSE, message=FALSE, cache=TRUE}
+#extrafont
+ggraph(g_essential,layout = 'kk') + 
+  geom_edge_link(edge_width=0.3, arrow = arrow(length = unit(0.8, 'mm')), 
+                   end_cap = circle(0.8, 'mm'), aes(colour = sign_score_sign)) + 
+  geom_node_point(size=1, aes(color=essentiality.consensus))+
+  scale_edge_color_manual(values = c("positive"="dodgerblue", "negative"="firebrick1"), name="Link Sign")+
+  scale_color_manual(values=c("Essential"="firebrick1", "Conditional"= "gray20"), name= "Essentiality consensus")+
+  #ggtitle("Subnetwork of the essential proteins of Drosophila")+
+  theme_graph()+
+  theme(text=element_text(size=10, family="Times"))+
+  theme(plot.title = element_text(size=12, vjust=1,family="Times"))
+
+
+ggsave("Subnetwork_Essential_Proteins.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+#ggraph_g_essential + facet_nodes(~essentiality.consensus)
+
+```
+
+### Essential to Essential
+
+```{r}
+# Only links between essential nodes
+ONLYessential_genes_net <- subset(dros_net, ID1_consensus=="Essential" & ID2_consensus=="Essential")
+
+write.table(ONLYessential_genes_net,file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/ONLYessential_genes_net.txt", sep = ",",col.names = T,row.names = F, quote = F)
+
+g_ONLY_essential <- graph_from_data_frame(ONLYessential_genes_net, directed = T)
+
+# layg3 <- layout_nicely(g_ONLY_essential)
+# 
+# plot(g_ONLY_essential, 
+#      layout=layg3,
+#      vertex.shape="circle", 
+#      vertex.size=0.295, 
+#      vertex.color=V(g_ONLY_essential)$color,  
+#      vertex.frame.color=V(g_ONLY_essential)$color,
+#      vertex.label=NA, 
+#      #vertex.label.cex = vcount(g)*0.00004,
+#      #vertex.label.color ="black", 
+#      edge.color=E(g_ONLY_essential)$color,
+#      edge.width=0.53, 
+#      edge.arrow.size = 0.31,
+#      edge.arrow.width = 0.5,
+#      #edge.label=round(x = E(g)$weight,digits = 3), 
+#      #edge.label.cex = 0.3,
+#      #edge.label.color = E(g)$color,
+#      margin = 0,
+#      main = "",
+#      sub = "")
+# title(main = paste("Only links between essential nodes"), cex.main= 1.5, cex.sub = 1.2,outer = F)
+
+```
+
+```{r}
+
+ggraph(g_ONLY_essential,layout = 'randomly') + 
+  geom_edge_link(edge_width=0.2, arrow = arrow(length = unit(0.8, 'mm')), 
+                   end_cap = circle(0.8, 'mm'), aes(colour = sign_score_sign)) + 
+  geom_node_point(size=0.5)+
+  #ggtitle("Links between essential proteins of Drosophila")+
+  theme_graph()+
+  theme(text=element_text(size=10, family="Times"))+
+  theme(plot.title = element_text(size=12, vjust=1,family="Times"))
+
+ggsave("Subnetwork_Essential_Proteins_Links.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+
+The essential nodes form a sort of clique with positive links. The clique has been mentioned before 
+
+>In addition, as reported by [@Zotenko2008a], essential proteins tend to form highly connected clusters rather than function independently [@Li2012b]. 
+
+Also look for autocatalytic sets in the complete network and compare with the essential genes subgraph. 
+
+>An ACS is a subgraph, each of whose nodes has at least one incoming link from a node belonging to the same subgraph [@Kauffman1993a]. In the organized state, all the species except possibly the one being picked for replacement are part of the ACS [@Nghe2015]. The ACS consists of a core and a periphery. The core comprises the set of nodes (along with their mutual links) from which there is a directed path to every other node in the ACS [@Mehrotra2009].
+
+This result maybe has an evolutionary trait. Something like growth and regulation, cooperation and regulation. 
+
+In [@Sole2011a]:
+
+>Cooperation has been suggested as an essential step toward the emergence of complex, self-organized chemical systems (Eigen 1971)
+
+## Network Frobenius Decomposition of essential cluster
+
+In order to study the inner structure of the essential cliques we will examine the matrices. Are they irreducible? 
+
+```{r, warning=FALSE,message=FALSE}
+
+library(popdemo)
+is_connected(g_ONLY_essential)
+
+g_ONLY_essential_giant <-decompose.graph(g_ONLY_essential, min.vertices = 10) #upografima tis megalis sinistosas 
+
+g_ONLY_essential_giant<-g_ONLY_essential_giant[[1]]
+essential_adjacency <- get.adjacency(graph = g_ONLY_essential_giant, names = T)
+essential_adjacency <- as.matrix(essential_adjacency)
+
+write.table(V(g_ONLY_essential_giant)$name,file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/g_ONLY_essential_giant.csv", sep = ",", col.names = FALSE,row.names = FALSE)
+
+is.matrix_irreducible(essential_adjacency)
+is.matrix_ergodic(essential_adjacency)
+
+reducible_blocks <- blockmatrix(essential_adjacency) # changes the order of the columns/rows with the given order. Still the direction of the edges is row to column!!
+
+det_re <- det(reducible_blocks$blockmatrix)
+
+svd_matrix <- svd(reducible_blocks$blockmatrix)
+
+
+```
+
+The definition of irreducibility from [@Gradshteyn2007]:
+
+Definition missing...
+
+Our matrix is reducible and non-ergodic. But how to find the disjoint sets? 
+
+Authors of [@Stott2010a] propose that matrices should be defined as irreducible, reducible–ergodic or reducible–non-ergodic and that this information be used to guide analysis.
+
+The reducible matrix of the essential proteins subnetwork.
+
+```{r}
+#heatmap.2(reducible_blocks$blockmatrix,dendrogram='none',Rowv=F,Colv = F,trace='none') #Simple and fast heatplot, but careful with the axes. 
+
+reducible_essentials <- melt(reducible_blocks$blockmatrix) # Var1 is the rows of the blockmatrix and Var2 the columns. 
+
+#library(ggthemes)
+
+x2 <- reducible_essentials 
+x2$value <-  with(x2, ifelse(Var1==Var2,"diagonal",value)) # insert diagonal information in order to visualise better the adjacency matrix
+
+ggplot() + #factor in order to assign a color to the value
+  geom_tile(data = x2 , aes(x=Var2, y=Var1, fill=factor(value)),color="gray", size=0.1)+
+  #ggtitle("Essential proteins reducible matrix")+
+  labs(x=NULL, y=NULL)+
+  scale_fill_manual("Values",values = c("0"="white","1"="gray65","diagonal"="gray35"))+
+  scale_x_continuous(position = "top", breaks = seq(1,36,2),expand=c(0,0))+
+  scale_y_continuous(trans = "reverse", breaks = seq(1,36,2),expand=c(0,0))+
+  coord_fixed()+
+  coord_equal()+
+  theme(axis.text=element_text(size=7,hjust = 0.5))+
+  theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("Essential_proteins_reducible_matrix.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+The order of columns and rows has been changed with the following: `r paste(reducible_blocks$order,sep = ",")`.
+
+Spectral radius of the matrix and eigenvectors.
+
+```{r, warning=FALSE,message=FALSE}
+# perron frobenius decomposition
+library(sparsevar)
+
+ss <- frobNorm(essential_adjacency)
+essential_matrix_spectral_radius <- spectralRadius(essential_adjacency) # max eigenvalue. 
+
+
+```
+
+### Strongly connected components
+
+Two vertices belong to the same strong component if and only if the are reachable from each other via directed paths. In this implementation we used the Tarjan's algorithm, explained in [@Knuth1994], for finding the strong components from the R package RBGL (RBGL: R interface to boost graph library).
+
+If a graph is irreducible then it is strongly connected and vice versa.  
+
+
+```{theorem, name="Irreducible and strongly connected",echo=TRUE}
+
+An n x n complex matrix A is irreducible if and only if its directed graph G(A) is strongly connected.
+
+```
+
+### Strongly connected component of the subnetwork
+
+```{r, warning=FALSE,message=FALSE}
+# Strongly connected components
+
+#http://math.stackexchange.com/questions/350994/prove-that-a-strongly-connected-digraph-has-an-irreducible-adjacency-matrix
+
+library(RBGL)
+
+essential_nodes_graph_NEL <- as_graphnel(g_ONLY_essential_giant)
+
+strong_comp_essential_nodes <- strongComp(essential_nodes_graph_NEL)
+
+strong_comp_essential_nodes_sizes <- as.data.frame(sapply(X = strong_comp_essential_nodes,FUN = length))
+# 8 has 20 nodes
+
+```
+
+The subnetwork of the edges between the essential proteins has only one strongly connected component with 20 proteins. These are `r strong_comp_essential_nodes[[8]]`. 
+
+```{r}
+strongly_conn_essential_proteins <- strong_comp_essential_nodes[[8]]
+
+write.table(strong_comp_essential_nodes[[8]],file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/strong_comp_essential_nodes.csv", sep = ",", col.names = FALSE,row.names = FALSE)
+
+graph_strongly_conn_essential_proteins <- induced_subgraph(g_ONLY_essential_giant,vids = strongly_conn_essential_proteins)
+
+adjacency_graph_strongly_conn_essential_proteins <- get.adjacency(graph = graph_strongly_conn_essential_proteins, names = T)
+adjacency_graph_strongly_conn_essential_proteins <- as.matrix(adjacency_graph_strongly_conn_essential_proteins)
+
+is.matrix_irreducible(adjacency_graph_strongly_conn_essential_proteins)
+is.matrix_ergodic(adjacency_graph_strongly_conn_essential_proteins)
+
+```
+
+The strongly connected component is irreducible as the theorem states. 
+
+
+The second Frobenious theorem.
+Since the max abs eigenvalue is 1 we cannot decompose the graph.
+
+```{r}
+ee <- eigen(adjacency_graph_strongly_conn_essential_proteins)
+
+ee_ss <- as.data.frame(ee$values)
+colnames(ee_ss) <- "values"
+ee_ss$modulus <- Mod(ee_ss$values)
+ee_ss$real <- Re(ee_ss$values)
+
+ee_ss$mod_duplicates <- duplicated(ee_ss$modulus) | duplicated(ee_ss$modulus, fromLast=TRUE)
+ee_ss$real_duplicates <- duplicated(ee_ss$real) | duplicated(ee_ss$real, fromLast=TRUE)
+
+ee_ss$duplicates <- duplicated(ee_ss$values, fromlast=F)|duplicated(ee_ss$values, fromlast=T)
+
+
+```
+
+Create the network of components.
+
+```{r}
+# # From graph object to edgelist format.
+Func_essential_component_strong_components <- strong_comp_essential_nodes
+
+essential_edgelist_names <- as.data.frame(get.edgelist(g_ONLY_essential_giant))
+essential_edge_attributes <- as.data.frame(igraph::get.edge.attribute(graph = g_ONLY_essential_giant,index = E(g_ONLY_essential_giant)))
+
+essential_edgelist_ok <- cbind(essential_edgelist_names,essential_edge_attributes)
+
+# strong connected components to dataframe
+## best solution for list to dataframe !!! 
+
+essential_strongly_connected_components_dataframe <- data.frame(Component = rep(names(Func_essential_component_strong_components), lapply(Func_essential_component_strong_components, length)), Vertex = unlist(Func_essential_component_strong_components))
+
+# Sizes of strongly connected components
+essential_strongly_connected_components_dataframe <- essential_strongly_connected_components_dataframe %>% group_by(Component) %>% mutate(Size=n()) %>% dplyr::select(Vertex, Component, Size)
+
+essential_strongly_connected_components_dataframe_size <- essential_strongly_connected_components_dataframe %>% group_by(Component, Size) %>% distinct()
+
+# Summarised components : Number of components with x vertices
+strongly_connected_components_dataframe_SUMMARIZED <- essential_strongly_connected_components_dataframe %>% group_by(Size, Component) %>% distinct() %>% group_by(Size) %>% summarise("Number of components"=n()) 
+
+# Merge edgelist with the strongly connected components IDs
+essential_edgelist_components <- left_join(x = essential_edgelist_ok,y = essential_strongly_connected_components_dataframe, by=c("V1" = "Vertex"))
+essential_edgelist_components <- left_join(x = essential_edgelist_components,y = essential_strongly_connected_components_dataframe, by=c("V2" = "Vertex"))
+
+# Summarise edges between components
+essential_edgelist_components_SUMMARIZED <- essential_edgelist_components %>% group_by(Component.x, Size.x, Component.y, Size.y) %>% summarise(count=n()) %>% dplyr::select(Component.x, Component.y, Size.x, Size.y, count)
+
+write.table(x = essential_edgelist_components_SUMMARIZED, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/Essential_Strongly_Connected_Components_Network.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+g_essential_components <- graph_from_data_frame(essential_edgelist_components_SUMMARIZED, directed = T, vertices = essential_strongly_connected_components_dataframe_size)
+
+g_essential_components <- igraph::simplify(g_essential_components, remove.loops = T,remove.multiple = F)
+
+g_ONLY_essential_giant <- graph_from_data_frame(essential_edgelist_components, directed = T, vertices = essential_strongly_connected_components_dataframe)
+
+V(g_ONLY_essential_giant)$In_Degree <- igraph::degree(g_ONLY_essential_giant, mode = "in")
+V(g_ONLY_essential_giant)$Color <- ifelse(V(g_ONLY_essential_giant)$Component!=8,"Outside component","Strongly connected component")
+
+V(g_essential_components)$In_Degree <- igraph::degree(g_essential_components, mode = "in")
+V(g_essential_components)$Out_Degree <- igraph::degree(g_essential_components, mode = "out")
+V(g_essential_components)$color <- with(essential_strongly_connected_components_dataframe_size,ifelse(Size==1,"firebrick2","slateblue3"))
+
+```
+
+```{r, echo=F}
+ggraph(g_ONLY_essential_giant,layout = 'kk') + 
+  geom_edge_link(edge_width=0.3, arrow = arrow(length = unit(0.9, 'mm')), 
+                   end_cap = circle(1, 'mm'),colour = "dodgerblue") + 
+  geom_node_point(size=1, aes(color=V(g_ONLY_essential_giant)$Color), show.legend=T)+
+  scale_color_manual(values=c("Outside component"="firebrick2", "Strongly connected component"="slateblue3"),labels=c("Singular components","Strongly connected component"), name="Components")+
+  #ggtitle("Links between essential proteins of Drosophila")+
+  theme_graph()+
+  theme(text=element_text(size=10, family="Times"))+
+  theme(plot.title = element_text(size=12, vjust=1,family="Times"))+
+  theme(legend.position = c(0.7, 0.2))
+
+ggsave("Subnetwork_Essential_Proteins_Links_Strongly.pdf", plot = last_plot(), device = "pdf", dpi = 300,path = "Figures/")
+```
+
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+
+# lay <- layout_nicely(g_essential_components)
+# id <- tkplot(g_essential_components, layout=lay)
+# canvas <- tk_canvas(id)
+# tk_coords <- tk_coords(id)
+# 
+# write.table(tk_coords,file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/strong_comp_essential_nodes_coordinates.csv", sep = ",", col.names = T,row.names = FALSE)
+#tk_coords <- as.matrix(read_csv("../Thesis_Essentiality_Drosophila_Signed_Network/Tables/strong_comp_essential_nodes_coordinates.csv",col_names = T))
+# tk_close(id)
+
+tk_coords <- matrix(data = c(244,121,71,142,84,149,294,217,473,373,421,577,505,505,215,83,352,0,62,127,172,221,334,337,380,243,241,338,339,402,478,472,473,473),ncol = 2)
+
+pdf(file = "Figures/Subnetwork_Essential_cluster_Frobenius_Decomposition_Components_network.pdf")
+
+plot(g_essential_components,
+     layout=tk_coords,
+     vertex.shape="circle",
+     vertex.size=4+sqrt(V(g_essential_components)$Size),
+     vertex.color=V(g_essential_components)$color,
+     vertex.frame.color=V(g_essential_components)$color,
+     vertex.label=V(g_essential_components)$name,
+     vertex.label.cex = 1,
+     vertex.label.dist=0.85,
+     vertex.label.degree=3,
+     vertex.label.color ="black",
+     edge.color="dodgerblue",
+     edge.width=0.42*sqrt(E(g_essential_components)$count),
+     edge.arrow.size = 0.41,
+     edge.arrow.width = 0.85,
+     #edge.label=round(x = E(g)$weight,digits = 3),
+     #edge.label.cex = 0.3,
+     #edge.label.color = E(g)$color,
+     margin = 0,
+     main = "",
+     sub = "")
+#title(main = paste("Subnetwork of the components of essential proteins of Drosophila"), cex.main= 1, cex.sub = 1.2,outer = F)
+
+dev.off()
+
+plot(g_essential_components,
+     layout=tk_coords,
+     vertex.shape="circle",
+     vertex.size=4+sqrt(V(g_essential_components)$Size),
+     vertex.color=V(g_essential_components)$color,
+     vertex.frame.color=V(g_essential_components)$color,
+     vertex.label=V(g_essential_components)$name,
+     vertex.label.cex = 1,
+     vertex.label.dist=0.85,
+     vertex.label.degree=3,
+     vertex.label.color ="black",
+     edge.color="dodgerblue",
+     edge.width=0.42*sqrt(E(g_essential_components)$count),
+     edge.arrow.size = 0.41,
+     edge.arrow.width = 0.85,
+     #edge.label=round(x = E(g)$weight,digits = 3),
+     #edge.label.cex = 0.3,
+     #edge.label.color = E(g)$color,
+     margin = 0,
+     main = "",
+     sub = "")
+#title(main = paste("Subnetwork of the components of essential proteins of Drosophila"), cex.main= 1, cex.sub = 1.2,outer = F)
+
+```
+
+## Strongly connected components of the whole network
+
+Strongly connected components in the whole drosophila network.
+
+```{r}
+# all drosophila network
+giant_component_strong_components <- as_graphnel(gcomp)
+
+giant_component_strong_components <- strongComp(giant_component_strong_components)
+
+dd_strong <- as.data.frame(sapply(X = giant_component_strong_components, FUN = length))
+colnames(dd_strong) <- "vertices_in_components"
+
+dd_strong_counts <- dd_strong %>% group_by(vertices_in_components) %>% summarise(count_components=n())
+
+write.table(giant_component_strong_components[[882]],file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/giant_component_strong_component882.csv", sep = ",", col.names = FALSE,row.names = FALSE)
+
+```
+
+
+There is one big strongly connected component in drosophila's network.  
+```{r, echo=FALSE}
+# table of strong connected components
+colnames(dd_strong_counts) <- c("Vetrices in the components","Number of components")
+
+caption_dd_strong_counts <- "Counts of strongly connected components in the whole Drosophila network with the same number of vertices"
+kable(dd_strong_counts,caption=caption_dd_strong_counts, align = 'c')
+
+write.table(x = dd_strong_counts, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/Drosophila_Strongly_Connected_Components_Size_Distribution.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+The subnetwork of the strongly connected component.
+```{r}
+subnet_stronly_con <- induced_subgraph(gcomp,vids = giant_component_strong_components[[882]])
+
+
+# layg4 <- layout_nicely(subnet_stronly_con)
+# 
+# plot(subnet_stronly_con, 
+#      layout=layg4,
+#      vertex.shape="circle", 
+#      vertex.size=0.295, 
+#      vertex.color=V(subnet_stronly_con)$color,  
+#      vertex.frame.color=V(subnet_stronly_con)$color,
+#      vertex.label=NA, 
+#      #vertex.label.cex = vcount(g)*0.00004,
+#      #vertex.label.color ="black", 
+#      edge.color=E(subnet_stronly_con)$color,
+#      edge.width=0.53, 
+#      edge.arrow.size = 0.31,
+#      edge.arrow.width = 0.5,
+#      #edge.label=round(x = E(g)$weight,digits = 3), 
+#      #edge.label.cex = 0.3,
+#      #edge.label.color = E(g)$color,
+#      margin = 0,
+#      main = "",
+#      sub = "")
+# title(main = paste("The largest strongly connected component of Drosophila signed network"), cex.main= 1.5, cex.sub = 1.2,outer = F)
+
+```
+
+```{r, message=FALSE, warning=FALSE, cache=TRUE}
+ggraph(subnet_stronly_con,layout = 'randomly') + 
+  geom_edge_link(edge_width=0.2, arrow = arrow(length = unit(0.8, 'mm')), 
+                   end_cap = circle(0.8, 'mm'), aes(colour = sign_score_sign)) + 
+  geom_node_point(size=0.5, aes(color=essentiality.consensus))+
+  #ggtitle("The irreducible component of the drosophila signed protein network")+
+  theme_graph()+
+  theme(text=element_text(size=10, family="Times"))+
+  theme(plot.title = element_text(size=12, vjust=1,family="Times"))
+
+ggsave("Subnetwork_Irreducible_Component_All_Drosophila_Network.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+
+The second Frobenius theorem. For maximum eigenvalues. There is one maximum eigenvalue as before. So this analysis is done. No further decomposition is applicable according to the theorem.
+
+```{r}
+adjacency_subnet_stronly_con <- get.adjacency(graph = subnet_stronly_con, names = T)
+adjacency_subnet_stronly_con <- as.matrix(adjacency_subnet_stronly_con)
+
+eigen_adjacency_subnet_stronly_con <- eigen(adjacency_subnet_stronly_con)
+
+eigen_adjacency_subnet_stronly_con_ss <- as.data.frame(eigen_adjacency_subnet_stronly_con$values)
+colnames(eigen_adjacency_subnet_stronly_con_ss) <- "values"
+eigen_adjacency_subnet_stronly_con_ss$modulus <- Mod(eigen_adjacency_subnet_stronly_con_ss$values)
+
+eigen_adjacency_subnet_stronly_con_ss$mod_duplicates <- duplicated(eigen_adjacency_subnet_stronly_con_ss$modulus) | duplicated(eigen_adjacency_subnet_stronly_con_ss$modulus, fromLast=TRUE)
+
+eigen_adjacency_subnet_stronly_con_ss$duplicates <- duplicated(eigen_adjacency_subnet_stronly_con_ss$values, fromlast=F)|duplicated(eigen_adjacency_subnet_stronly_con_ss$values, fromlast=T)
+
+
+
+```
+
+
+Attributes of protein in the strongly connected component.
+
+```{r}
+#vetrices
+protein_attr_stronlgt_con_comp <- sapply(igraph::list.vertex.attributes(subnet_stronly_con),function(x) igraph::get.vertex.attribute(subnet_stronly_con,x))
+
+protein_attr_stronlgt_con_comp <- as.data.frame(protein_attr_stronlgt_con_comp)
+
+protein_attr_stronlgt_con_comp_essential <- protein_attr_stronlgt_con_comp %>% group_by(essentiality.consensus) %>% summarise(count=n())
+
+#edges
+
+edges_attr_strongly_con_comp <- edge_attr(subnet_stronly_con)
+edges_attr_strongly_con_comp <- as.data.frame(edges_attr_strongly_con_comp,sep="\t")
+
+edges_attr_strongly_con_comp_signs <- edges_attr_strongly_con_comp %>% group_by(sign_weights) %>% summarise(count=n())
+
+
+```
+
+### Network decomposition with strongly connected components
+
+```{r}
+# all drosophila network
+
+# requires igraph, RGBL, dplyr
+# input a network, igraph odject
+# 
+# Func_giant_component_strong_components <- as_graphnel(gcomp) # slow function
+# 
+# # The components Tarjan's algorithm
+# Func_giant_component_strong_components <- RBGL::strongComp(Func_giant_component_strong_components)
+# 
+# # From graph object to edgelist format.
+Func_giant_component_strong_components <- giant_component_strong_components
+
+gcomp_edgelist_names <- as.data.frame(get.edgelist(gcomp))
+gcomp_edge_attributes <- as.data.frame(igraph::get.edge.attribute(graph = gcomp,index = E(gcomp)))
+
+gcomp_edgelist_ok <- cbind(gcomp_edgelist_names,gcomp_edge_attributes)
+
+# strong connected components to dataframe
+## best solution for list to dataframe !!! 
+
+strongly_connected_components_dataframe <- data.frame(Component = rep(names(Func_giant_component_strong_components), lapply(Func_giant_component_strong_components, length)), Vertex = unlist(Func_giant_component_strong_components)) 
+
+# Sizes of strongly connected components
+strongly_connected_components_dataframe <- strongly_connected_components_dataframe %>% group_by(Component) %>% mutate(Size=n())
+
+strongly_connected_components_ONLYdataframe <- strongly_connected_components_dataframe %>% group_by(Component, Size) %>% dplyr::distinct()
+
+# Summarised components : Number of components with x vertices
+strongly_connected_components_dataframe_SUMMARIZED <- strongly_connected_components_dataframe %>% group_by(Size, Component) %>% distinct() %>% group_by(Size) %>% summarise("Number of components"=n()) 
+
+# Merge edgelist with the strongly connected components IDs
+gcomp_edgelist_components <- left_join(x = gcomp_edgelist_ok,y = strongly_connected_components_dataframe, by=c("V1" = "Vertex"))
+gcomp_edgelist_components <- left_join(x = gcomp_edgelist_components,y = strongly_connected_components_dataframe, by=c("V2" = "Vertex"))
+
+# Summarise edges between components
+gcomp_edgelist_components_SUMMARIZED <- gcomp_edgelist_components %>% group_by(Component.x, Size.x, Component.y, Size.y) %>% summarise(count=n())
+
+write.table(x = gcomp_edgelist_components_SUMMARIZED, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/Strongly_Connected_Components_Network.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+```
+
+```{r, echo=F}
+g_components <- graph_from_data_frame(gcomp_edgelist_components_SUMMARIZED, directed = T, vertices = strongly_connected_components_ONLYdataframe)
+
+g_components <- igraph::simplify(g_components, remove.loops = T,remove.multiple = F)
+
+
+```
+
+### Cycles and Motifs
+
+```{r, message=FALSE, warning=FALSE}
+
+library(sna)
+
+cycle_test <- kcycle.census(dat = adjacency_graph_strongly_conn_essential_proteins,maxlen = 20,mode = "digraph",cycle.comembership = "bylength",tabulate.by.vertex=FALSE)
+
+mmm <- count_motifs(graph_strongly_conn_essential_proteins, size = 3)
+```
+
+
+### The Perron - Frobenius decomposition
+
+The blocks after the permutation with the blockmatrix function of the popdemo package weren't irreducible. So there is something wrong.. 
+
+```{r}
+# Are blocks across the diagonal irreducible? 
+
+ddd <- reducible_blocks$blockmatrix[c(5:13),c(5:13)]
+is.matrix_irreducible(ddd)
+
+dddd <- blockmatrix(ddd)
+sss <- dddd$blockmatrix[c(1:7),c(1:7)]
+is.matrix_irreducible(sss)
+
+####
+frob_IDS <- as.data.frame(x =rownames(essential_adjacency))
+colnames(frob_IDS)[1] <- "IDS"
+frob_IDS$original_index <- seq(1,nrow(frob_IDS),by = 1)
+frob_IDS$permuted_index <- reducible_blocks$order
+
+frob_IDS$frob_decomposition <- with(frob_IDS, ifelse(permuted_index<24,1,ifelse(permuted_index==24,2,3))) # the blocks are : 1-23, 24, 25-36
+
+reducible_essentials_edgelist <- 
+left_join(x = reducible_essentials, y = frob_IDS, by=c("Var1"= "permuted_index"))
+
+reducible_essentials_edgelist <- 
+left_join(x = reducible_essentials_edgelist, y = frob_IDS, by=c("Var2"= "permuted_index"))
+
+reducible_essentials_edgelist2 <- reducible_essentials_edgelist %>% filter(value>0)
+
+frob_block_edgelist <- reducible_essentials_edgelist2 %>% group_by(frob_decomposition.x, frob_decomposition.y) %>% summarise(count=n()) # count the links in and between the blocks!! 
+
+
+```
+
+
+```{r, echo=FALSE}
+frob_block_edgelist_table <- frob_block_edgelist
+colnames(frob_block_edgelist_table) <- c("From Frobenius block","To Frobenius block", "Edges count")
+
+caption_frob <- "Counts of edges in and between frobenius blocks"
+kable(frob_block_edgelist_table,caption=caption_frob, align = 'c')
+
+write.table(x = frob_block_edgelist_table, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/Wrong_Frobenius_Decomposition_Components_Network.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+
+
+### Functional annotation with Panther
+
+Functional information of the proteins inside the cluster. Is there any biological explaination for the positive edges and the structure of the cluster as represented from the Frobenius decomposition.
+
+```{r, warning=FALSE, message=FALSE}
+# from the panther database.
+
+panther_annotation <- read.delim("Data/pantherEssentialProtein_cluster.txt",header = F,sep = "\t")
+
+frob_IDS <- left_join(frob_IDS,panther_annotation, by=c("IDS"="V2"))
+
+#go term finder 
+
+
+```
+
+
+
+### Decomposition of essentials and neighbours
+
+For the essential proteins and their neighbours. 
+
+```{r, eval=FALSE}
+
+
+adjacency_g_essential_non_giant <- get.adjacency(graph = g_essential_non_giant,names = T)
+
+adjacency_g_essential_non_giant <- as.matrix(adjacency_g_essential_non_giant)
+
+ddd <- melt(adjacency_g_essential_non_giant)
+
+dddcast <- dcast(ddd, Var1~Var2,value.var = "value")
+dddcast <- tibble::column_to_rownames(dddcast,var="Var1")
+
+###########################
+
+essential_neighbors <- dros_net %>% filter(ID1_consensus=="Essential" | ID1_consensus=="Conditional" | ID2_consensus=="Essential" | ID2_consensus=="Conditional") %>% mutate(adjacency_value=1) 
+sss <- essential_neighbors[,c(1,2)]
+essential_neighbors_graph <- graph_from_data_frame(sss,directed = T)
+
+is_connected(essential_neighbors_graph)
+essential_neighbors_graph_deg <- decompose.graph(essential_neighbors_graph,min.vertices = 10)
+
+essential_neighbors_graph_giant <- essential_neighbors_graph_deg[[1]]
+
+essential_neighbors_adja_igraph <- as_adjacency_matrix(essential_neighbors_graph_giant,names = T,sparse = T,attr = NULL)
+
+essential_neighbors_adja_igraph <- as.matrix(essential_neighbors_adja_igraph)
+
+#adjacency_g_essential_non_giant <- get.adjacency(graph = g_essential_non_giant,names = T)
+
+sum(colSums(essential_neighbors_adja_igraph))
+is.matrix_irreducible(essential_neighbors_adja_igraph)
+is.matrix_ergodic(essential_neighbors_adja_igraph)
+eee <- blockmatrix(essential_neighbors_adja_igraph)
+
+##################################
+
+g_negative <- subgraph.edges(gcomp, eids=which(E(gcomp)$weights >0))
+
+g_negative_deg <- decompose.graph(g_negative,min.vertices = 10)
+
+g_negative_deg <- g_negative_deg[[1]]
+
+g_negative_deg_adja <- as_adjacency_matrix(g_negative_deg,names = T,sparse = F,attr = NULL)
+
+g_negative_deg_adja <- as.matrix(g_negative_deg_adja)
+is.matrix_irreducible(g_negative_deg_adja)
+
+###############################
+essential_neighbors_adjacency <- dcast(essential_neighbors,ID1~ID2, value.var = "adjacency_value")
+essential_neighbors_adjacency <- tibble::column_to_rownames(essential_neighbors_adjacency,var = "ID1")
+
+essential_neighbors_adjacency[is.na(essential_neighbors_adjacency)] <- 0
+
+sum(colSums(essential_neighbors_adjacency)) == nrow(essential_neighbors) # check if the number of edges from the edgelist is the same in the adjacency.
+
+#is.matrix_irreducible(as.matrix(essential_neighbors_adjacency))
+
+ss <- ddd %>% filter(value<0) # no negative values.. 
+
+sum(is.na(adjacency_g_essential_non_giant)) # no NA
+
+# Erdos renyi network is irreducible!
+ssss <- erdos.renyi.game(1520,p.or.m = 0.0008,directed = T) # without the direction
+es <- decompose.graph(ssss,min.vertices = 10)
+esd <- es[[1]]
+sss <- as.matrix(get.adjacency(esd, names = T))
+#is.matrix_irreducible(sss)
+
+# 
+deee <- decompose.graph(g_essential,min.vertices = 10)
+deee_giant <- deee[[1]]
+deee_giant_m <- as.matrix(get.adjacency(deee_giant, names = T))
+
+#is.matrix_irreducible(adjacency_g_essential_non_giant)
+
+#is.matrix_ergodic(adjacency_g_essential_non_giant)
+
+#essential_neighbours_reducible_blocks <- blockmatrix(adjacency_g_essential_non_giant)
+
+```
+
+Probably the problem is that the matrix is very sparse. There are several computational challenges associated with empirical network analysis and network simulations. Networks are typically very sparse, high- dimensional structures.
+
+## Network link analysis
+
+Link clustering
+Overlapping communities
+
+```{r, message=FALSE, warning=FALSE}
+library(linkcomm)
+
+
+```
+
+```{r, echo=FALSE}
+rm(list = setdiff(ls(), c("gcomp_attributes","dros_essential", "dros_network_genes", "dros_net", "drosophila_degreesA")))
+
+```
+
+
+# Protein complexes
+
+In protein networks finding communities with modularity based methods doesn't answer any important question. Proteins rarely function on their own, usually they form complexes with other proteins. For the protein interaction networks is crucial to determine the protein complexes which are the actual functional machines. Protein complexes vary in sizes and they share their building blocks, so they overlap in the protein interaction network.
+
+The experimental appoach is to pull down the complexes and identify them with mass spectrometry. The computational approach either uses homology to identify known complexies from one organism to the other or de novo identification with clustering algorithms in PPI networks. 
+
+**For yeast**
+Databases: *Up-to-date catalogues of yeast protein complexes*
+Experiment: *Global landscape of protein complexes in the yeast Saccharomyces* cerevisiae
+
+**For drosophila**
+Compleat database: *Protein Complex–Based Analysis Framework for High-Throughput Data Sets*
+Experiment: *A Protein Complex Network of Drosophila melanogaster*
+
+The prediction of protein complexes from PPI networks is an important task for biologists. Many different algorithms exist today. The authors of the article [@Ou-Yang2015a] implement signed networks for the complex prediction and more specificaly they used the drosophila signed PPI network. They mention:
+
+>In this section, we compare SGNMF with seven state-of-the-art approaches that detect >protein complexes from PPI networks, namely ClusterONE [19], MCL [15], MINE [18], >MCODE [16], SPICi [17], EC-BNMF [22] and NMF [30]. The performance of all the >compared methods are evaluated in terms of three metrics (Acc, FRAC and MMR) with >respect to four gold standards (COMPLEAT, CYC2008, MIPS and SGD).
+
+[CYC2008](http://wodaklab.org/cyc2008/)
+
+## COMPLEAT database
+
+From the COMPLEAT database and online tool we downloaded all the protein complexes of drosophila. The complexes are both from literature and predicted with a variety of tools. The methology is explained in the paper as well as in the [online portal](http://www.flyrnai.org/compleat/) [@Vinayagam2013a]. 
+
+```{r,warning=FALSE,message=FALSE}
+dros_complexes <- read.delim(file = "Data/drosophila_complexes_compleat0.txt",header = F,sep = "\t")
+#summary(dros_complexes)
+nrow(with(dros_complexes, dros_complexes[V3=="Literature",]))
+nrow(with(dros_complexes, dros_complexes[V3=="Predicted",]))
+
+# homo sapiens
+compleat_homo <- read.delim(file = "Data/compleat1_homo.txt",header = F,sep = "\t")
+compleat_homo <- compleat_homo[!(is.na(compleat_homo$V2)),] # remove empty rows
+# yeast
+compleat_yeast <- read.delim(file = "Data/compleat2_yeast.txt",header = F,sep = "\t")
+compleat_yeast <- compleat_yeast[!(is.na(compleat_yeast$V2)),] # remove empty rows
+
+```
+There are 5786 distinct proteins and 5326 complexes of drosophila in the data set.
+
+```{r, warning=FALSE,message=FALSE} 
+# All complexes
+dros_complexes_bi <- dros_complexes[,c(1,12)]
+splitted_complexes <- strsplit(x = as.character(dros_complexes_bi$V12), " ")
+Protein_Complex_bipartite <- data.frame(Complex = rep.int(dros_complexes_bi$V1, sapply(splitted_complexes, length)), Protein = unlist(splitted_complexes)) # create data frame with 2 columns (Complexes,Proteins). The first column repeat each element of the complexes with the length of the proteins from the list of proteins per complex. Then in the second column put all the proteins of the list (unlist).
+
+length(unique(Protein_Complex_bipartite$Protein))
+length(unique(Protein_Complex_bipartite$Complex))
+
+
+```
+
+## Proteins and Complexes Distributions 
+
+### How many proteins each complex contain? 
+
+The distribution of the proteins that the complexes consist of will elucidate the sizes and abundance of protein complexes. 
+
+```{r, echo=FALSE}
+# distribution of proteins that the protein complexes are build of.
+
+complex_dist <- 
+  Protein_Complex_bipartite %>% group_by(Complex) %>%
+  dplyr::summarise(complex_with_k_proteins=n()) %>%
+  group_by(complex_with_k_proteins) %>%
+  dplyr::summarise(n_complex_with_k_proteins=n())
+# first group with complexes and for each complex count the k proteins. Then repeat to find the count n of complexes with k proteins. 
+
+ggplot()+
+  geom_point(data = complex_dist, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins),color="red")+
+  #ggtitle("Distribution of Proteins in Drosophila's Protein Complexes")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  labs(x="number of proteins", y="frequency of complexes")+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Distribution_Proteins_in_Complexes_Drosoplila_Compleat.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+# homo sapiens
+compleat_homo_complex_distribution <- compleat_homo %>% group_by(V2) %>% summarise(n_complex_with_k_proteins=n())
+colnames(compleat_homo_complex_distribution)[1] <- "complex_with_k_proteins"
+
+# yeast
+compleat_yeast_complex_distribution <- compleat_yeast %>% group_by(V2) %>% summarise(n_complex_with_k_proteins=n())
+colnames(compleat_yeast_complex_distribution)[1] <- "complex_with_k_proteins"
+
+ggplot()+
+  geom_point(data = complex_dist, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="Fruit fly"))+
+  geom_point(data = compleat_homo_complex_distribution, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="Human"))+
+  geom_point(data = compleat_yeast_complex_distribution, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="Yeast"))+
+  #ggtitle("Distribution of Proteins in Complexes from COMPLEAT")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  scale_colour_manual(values = c("Fruit fly"="orange1", "Human"= "gray48", "Yeast"= "mediumaquamarine"), labels=expression(italic('D.melanogaster'), italic('H.sapiens'), italic('S.cerevisiae')), name="Organisms")+
+  labs(x="number of proteins", y="number of complexes")+
+  theme_bw()+
+  theme(legend.position = c(0.76,0.85))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+
+ggsave("Distribution_Proteins_in_Complexes_All_Compleat.pdf", width = 10,height = 12.5,units = "cm", plot = last_plot(), device = "pdf", dpi = 300,path = "Figures/")
+
+```
+
+There is a gap in the distribution between 15 and 16 number of proteins in the complexes. Below we plot this part only in log-lin scale. It looks like a phase transition but most probably has something to do with the data and the way they were produced.
+
+```{r, echo=FALSE}
+zoom_complex_dist <- complex_dist %>% filter(complex_with_k_proteins>10 & complex_with_k_proteins<20)
+
+ggplot()+
+  geom_point(data = zoom_complex_dist, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins),color="red")+
+  #ggtitle("Zoom Distribution of Proteins in Drosophila's Protein Complexes")+
+  scale_x_continuous(position = "bottom", breaks = seq(0,20,1))+
+  scale_y_log10()+
+  coord_fixed(ratio = 1)+
+  labs(x="number of proteins", y="frequency of complexes")+
+  theme_bw()
+
+ggsave("DistributionZOOM_Proteins_in_Complexes_Drosoplila_Compleat.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+Difference in the distribution between "Literature" and "Predicted".
+
+```{r, echo=FALSE}
+# join the predicted - literature info for each complex
+dros_complexes_bipartite_lit <- 
+left_join(x = Protein_Complex_bipartite, y = dros_complexes, by=c("Complex"= "V1"))
+
+# all predicted distribution
+
+complexes_dist_predicted <- dros_complexes_bipartite_lit %>% filter(V3=="Predicted") %>% group_by(Complex) %>%
+  dplyr::summarise(complex_with_k_proteins=n()) %>%
+  group_by(complex_with_k_proteins) %>%
+  dplyr::summarise(n_complex_with_k_proteins=n())
+
+# cfinder prediction distribution
+
+complexes_dist_cfinder <- dros_complexes_bipartite_lit %>% filter(V7=="CFinder") %>% group_by(Complex) %>% dplyr::summarise(complex_with_k_proteins=n()) %>%
+  group_by(complex_with_k_proteins) %>%
+  dplyr::summarise(n_complex_with_k_proteins=n())
+
+# networkBlast prediction distribution
+
+complexes_dist_NetworkBlast <- dros_complexes_bipartite_lit %>% filter(V7=="NetworkBlast") %>% group_by(Complex) %>% dplyr::summarise(complex_with_k_proteins=n()) %>%
+  group_by(complex_with_k_proteins) %>%
+  dplyr::summarise(n_complex_with_k_proteins=n())
+
+# literature distribution
+
+complexes_dist_literature <- dros_complexes_bipartite_lit %>% filter(V3=="Literature") %>% group_by(Complex) %>%
+  dplyr::summarise(complex_with_k_proteins=n()) %>%
+  group_by(complex_with_k_proteins) %>%
+  dplyr::summarise(n_complex_with_k_proteins=n())
+
+##### Literature VS Predicted
+ggplot()+
+  geom_point(data = complexes_dist_literature, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="Literature"))+
+  geom_point(data = complexes_dist_predicted, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="Predicted"))+
+  #ggtitle("Distribution of Proteins in Drosophila's Protein Complexes")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  scale_colour_manual(values = c("Literature"="dodgerblue","Predicted"="tomato1"))+
+  labs(x="number of proteins", y="frequency of complexes")+
+  theme_bw()
+ggsave("Distribution_Method_Proteins_in_Complexes_Drosoplila_Compleat.pdf",plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+
+```{r, echo=FALSE}
+#### Literature VS CFinder & NetworkBlast
+ggplot()+
+  geom_point(data = complexes_dist_literature, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="Literature"))+
+  geom_point(data = complexes_dist_cfinder, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="CFinder"))+
+  geom_point(data = complexes_dist_NetworkBlast, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="NetworkBlast"))+
+  #ggtitle("Distribution of Proteins in Drosophila's Protein Complexes")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  scale_colour_manual(values = c("Literature"="dodgerblue", "CFinder"= "springgreen", "NetworkBlast"= "orchid2" ), name= "Source")+
+  labs(x="number of proteins", y="frequency of complexes")+
+  theme_bw()+
+  theme(legend.position = c(0.75,0.85))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+
+ggsave("Distribution_Methods_All_Proteins_in_Complexes_Drosoplila_Compleat.pdf", width = 10,height = 11.5,units = "cm",plot = last_plot(), device = "pdf", dpi = 300,path = "Figures/")
+```
+
+```{r}
+compleat_drosophila_predicted2 <- dros_complexes %>% filter(V7=="NetworkBlast" | V7=="CFinder")
+
+random_dist <- as.data.frame(x=runif(n = 5000,min = 3,max = 189))
+colnames(random_dist) <- "Random"
+
+dros_complexes_lit <- dros_complexes %>% filter(V3=="Literature")
+
+ggplot()+ 
+  stat_ecdf(data = dros_complexes_lit, aes(x = V2, colour="Literature"),geom = "step")+
+  stat_ecdf(data = compleat_drosophila_predicted2, aes(x = V2, colour=V7),geom = "step")+
+  stat_ecdf(data = random_dist, aes(x = Random, colour="Random"),geom = "step")+
+  scale_colour_manual(values = c("Literature"="dodgerblue", "CFinder"= "springgreen", "NetworkBlast"= "orchid2", "Random"="black"), name="Source")+
+  scale_x_continuous(position = "bottom",breaks = seq(0,200,20))+
+  scale_y_continuous(position = "left", breaks = seq(0,1,0.2))+
+  #ggtitle("Cumulative distribution of Proteins in Fruit fly's Protein Complexes")+
+  labs(x="number of proteins", y="cumulative probability")+
+  theme_bw()+
+  theme(legend.position = c(0.88,0.370))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+ggsave("DistributionCumulative_Methods_All_Proteins_in_Complexes_Drosoplila_Compleat.pdf", plot = last_plot(), width = 14,height = 6,units = "cm",device = "pdf", dpi = 300,path = "Figures/")
+```
+
+
+For yeast.
+
+```{r}
+#yeast
+compleat_yeast_Literature <- compleat_yeast %>% filter(V3=="Literature") %>% group_by(V2) %>% summarise(n_complex_with_k_proteins=n())
+colnames(compleat_yeast_Literature)[1] <- "complex_with_k_proteins"
+
+compleat_yeast_NetworkBlast <- compleat_yeast %>% filter(V7=="NetworkBlast") %>% group_by(V2) %>% summarise(n_complex_with_k_proteins=n())
+colnames(compleat_yeast_NetworkBlast)[1] <- "complex_with_k_proteins"
+
+compleat_yeast_CFinder <- compleat_yeast %>% filter(V7=="CFinder") %>% group_by(V2) %>% summarise(n_complex_with_k_proteins=n())
+colnames(compleat_yeast_CFinder)[1] <- "complex_with_k_proteins"
+
+
+ggplot()+
+  geom_point(data = compleat_yeast_Literature, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="Literature"))+
+  geom_point(data = compleat_yeast_CFinder, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="CFinder"))+
+  geom_point(data = compleat_yeast_NetworkBlast, aes(x = complex_with_k_proteins, y = n_complex_with_k_proteins, color="NetworkBlast"))+
+  #ggtitle("Distribution of Proteins in Yeast's Protein Complexes")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  scale_colour_manual(values = c("Literature"="dodgerblue", "CFinder"= "springgreen", "NetworkBlast"= "orchid2" ), name="Source")+
+  labs(x="number of proteins", y="number of complexes")+
+  theme_bw()+
+  theme(legend.position = c(0.75,0.85))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Distribution_Methods_All_Proteins_in_Complexes_Yeast_Compleat.pdf",width = 10,height = 11.5,units = "cm", plot = last_plot(), device = "pdf", dpi = 300,path = "Figures/")
+
+```
+
+
+It's obvious that the predicted complexes are responsible for the previous "irregularity" in the distribution. The tools used from [@Vinayagam2013a] for the prediction of the complexes are the CFinder and NetworkBLAST. For all complexes, e.g literature curated and predicted complexes combined, 328 methods were used and for 112 complexes the reference method is missing. NetworkBlast provided more complexes by an order of magnitude compared to the other methods and is also biased towards medium sized complexes. 
+
+```{r, echo=FALSE}
+## different methods for prediction distribution
+complexes_dist_predicted_methods <- dros_complexes %>% filter(V3=="Predicted") %>% group_by(V7) %>% summarise(total_complexes=n())
+
+colnames(complexes_dist_predicted_methods) <- c("Method", "Predictions")
+
+caption_method_prediction <- "Methods used for the prediction of complexes"
+kable(complexes_dist_predicted_methods,caption=caption_method_prediction, align = 'c')
+
+write.table(x = complexes_dist_predicted_methods, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/Compleat_Database_Method_Predition_Complexes.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+```{r}
+Network_blast <- dros_complexes %>% filter(V7=="NetworkBlast")
+```
+
+
+Next we take a closer look at the literature methods and the protein complexes they have discovered.
+
+```{r, echo=FALSE}
+complexes_dist_methods_lit <- dros_complexes %>% filter(V3=="Literature") %>% group_by(V7) %>% summarise(total_complexes=n())
+
+complexes_dist_methods_lit <- complexes_dist_methods_lit[-1,] # remove the empty methods
+
+complexes_dist_methods_lit2 <- complexes_dist_methods_lit %>% group_by(total_complexes) %>% summarise(methods_with_n_complexes=n())
+
+ggplot()+
+  geom_point(data = complexes_dist_methods_lit2, aes(x = total_complexes, y = methods_with_n_complexes),color="coral1")+
+  #ggtitle("Distribution experimental methods and the number of complexes which they discovered")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  labs(x="number of complexes", y="frequency of methods")+
+  theme_bw()
+
+ggsave("Distribution_Literature_Proteins_in_Complexes_Drosoplila_Compleat.pdf", width = 7,height = 11,units = "cm",plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+
+### In how many complexes each protein is participating?
+
+```{r, echo=FALSE}
+# distribution of proteins that the protein complexes are build of.
+
+protein_dist <- Protein_Complex_bipartite %>% group_by(Protein) %>%
+  dplyr::summarise(protein_in_n_complex=n()) %>%
+  group_by(protein_in_n_complex) %>%
+  dplyr::summarise(k_proteins_in_n_complex=n())
+
+ggplot()+
+  geom_point(data = protein_dist, aes(x = protein_in_n_complex, y = k_proteins_in_n_complex),color="purple")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  #ggtitle("Distribution of Proteins participation in Protein Complexes of Drosophila")+
+  labs(x="number of complexes of protein", y="frequency")+
+  theme_bw()
+
+ggsave("Distribution_Complexes_in_Proteins_Drosoplila_Compleat.pdf",width = 7,height = 11,units = "cm", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+
+```{r}
+# drosophila
+compleat_drosophila2 <- dros_complexes[,c(1,3,7,12)]
+drosophila_splitted_complexes <- strsplit(x = as.character(compleat_drosophila2$V12), " ")
+
+compleat_drosophila_long <- data.frame(Complex = rep.int(compleat_drosophila2$V1, sapply(drosophila_splitted_complexes, length)),Method =  rep.int(compleat_drosophila2$V3, sapply(drosophila_splitted_complexes, length)), Tool = rep.int(compleat_drosophila2$V7, sapply(drosophila_splitted_complexes, length)), Protein = unlist(drosophila_splitted_complexes)) # create data frame with 2 columns (Complexes,Proteins). The first column repeat each element of the complexes with the length of the proteins from the list of proteins per complex. Then in the second column put all the proteins of the list (unlist).
+
+# yeast
+compleat_yeast2 <- compleat_yeast[,c(1,3,7,12)]
+yeast_splitted_complexes <- strsplit(x = as.character(compleat_yeast2$V12), " ")
+
+compleat_yeast_long <- data.frame(Complex = rep.int(compleat_yeast2$V1, sapply(yeast_splitted_complexes, length)), Method =  rep.int(compleat_yeast2$V3, sapply(yeast_splitted_complexes, length)), Tool = rep.int(compleat_yeast2$V7, sapply(yeast_splitted_complexes, length)), Protein = unlist(yeast_splitted_complexes)) 
+
+# human
+
+compleat_homo2 <- compleat_homo[,c(1,5)]
+homo_splitted_complexes <- strsplit(x = as.character(compleat_homo2$V5), ";")
+
+compleat_homo_long <- data.frame(Complex = rep.int(compleat_homo2$V1, sapply(homo_splitted_complexes, length)), Protein = unlist(homo_splitted_complexes)) 
+
+```
+
+
+```{r}
+# drosophila
+compleat_drosophila_protein_dist <- compleat_drosophila_long %>% group_by(Protein) %>% summarize(k_complexes=n()) %>% group_by(k_complexes) %>% summarise(n_protein_k_complexes=n())
+# yeast
+compleat_yeast_protein_dist <- compleat_yeast_long %>% group_by(Protein) %>% summarize(k_complexes=n()) %>% group_by(k_complexes) %>% summarise(n_protein_k_complexes=n())
+# homo
+compleat_homo_protein_dist <- compleat_homo_long %>%  group_by(Protein) %>% summarize(k_complexes=n()) %>% group_by(k_complexes) %>% summarise(n_protein_k_complexes=n())
+
+```
+
+
+```{r}
+ggplot()+
+  geom_point(data = compleat_drosophila_protein_dist, aes(x = k_complexes, y = n_protein_k_complexes,color="Fruit fly"))+
+  geom_point(data = compleat_yeast_protein_dist, aes(x = k_complexes, y = n_protein_k_complexes,color="Yeast")) +
+  geom_point(data = compleat_homo_protein_dist, aes(x = k_complexes, y = n_protein_k_complexes, color="Human"))+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  scale_colour_manual(values = c("Fruit fly"="orange1", "Yeast"= "mediumaquamarine", "Human"="gray48"),labels=expression(italic('D.melanogaster'), italic('H.sapiens'), italic('S.cerevisiae')), name="Organisms")+
+  #ggtitle("Distribution of Proteins participation in Protein Complexes in Compleat")+
+  labs(x="number of complexes of protein", y="number of proteins")+
+  theme_bw()+
+  theme(legend.position = c(0.78,0.83))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Distribution_Complexes_in_Proteins_ALL_Compleat.pdf",width = 11.5,height = 11.5,units = "cm", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+### Complexes in the network
+
+Which of these protein complexes are present in our data set?
+
+```{r}
+
+dros_network_genes <- read_csv("../Thesis_Essentiality_Drosophila_Signed_Network/Tables/dros_network_genes.csv",col_names = TRUE)
+
+complexes_included <- as.data.frame(Protein_Complex_bipartite[Protein_Complex_bipartite$Protein %in% dros_network_genes$locus, ])
+
+length(unique(complexes_included$Complex))
+
+complex_exist_proteins <- as.data.frame(table(complexes_included$Complex))
+
+complex_exist_proteins_m <- merge(x = complex_exist_proteins,y = dros_complexes,by.x = 1,by.y = 1,all.x = T)
+
+# the complete complexes of the dataset.
+complete_complexes <- complex_exist_proteins_m[complex_exist_proteins_m$Freq==complex_exist_proteins_m$V2,]
+
+complete_complexes %>% filter(V3=="Literature") %>% nrow()
+complete_complexes %>% filter(V3=="Predicted") %>% nrow()
+
+
+
+```
+
+From the protein complex annotation of the signed PPI network of Drosophila we found that only 585 complexes are complete. Meaning that all of their proteins are present (not necessarily interacting with each other) in the data set even though 5027 complexes have 1 or more proteins appearing in the network. The 326 of them are from literature and the 259 are predicted with the tools mentioned before. 
+
+```{r}
+# predicted distribution of complete complexes
+complete_complexes_dist_predicted <- complete_complexes %>% filter(V3=="Predicted") %>% group_by(Freq) %>%
+  dplyr::summarise(n_complex_with_k_proteins=n())
+
+# literature distribution of complete complexes
+
+complete_complexes_dist_literature <- complete_complexes %>% filter(V3=="Literature") %>% group_by(Freq) %>%
+  dplyr::summarise(n_complex_with_k_proteins=n())
+
+ggplot()+
+  geom_point(data = complete_complexes_dist_literature, aes(x = Freq, y = n_complex_with_k_proteins, color="Literature"))+
+  geom_point(data = complete_complexes_dist_predicted, aes(x = Freq, y = n_complex_with_k_proteins, color="Predicted"))+
+  #ggtitle("Distribution of Proteins in Drosophila's Complete Protein Complexes")+
+  scale_y_log10() +
+  #scale_x_log10()+
+  #coord_fixed(ratio = 1)+
+  scale_colour_manual(values = c("Literature"="dodgerblue","Predicted"="tomato1"), name="Source")+
+  labs(x="number of proteins", y="frequency of complexes")+
+  theme_bw()
+ggsave("Distribution_Proteins_in_Complexes_Drosoplila_Complete_in_Network.pdf", width = 7,height = 11,units = "cm",plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+What is the % of the missing proteins?
+
+```{r}
+compare_complexes_proteins <- complex_exist_proteins_m[,c(1,2,3,4)]
+
+# % of missing proteins
+
+compare_complexes_proteins$compare_percent <- with(compare_complexes_proteins, compare_complexes_proteins$Freq/compare_complexes_proteins$V2)
+
+ggplot()+
+  geom_histogram(data = compare_complexes_proteins, aes(x = compare_percent, y = ..count..,fill=V3 ), bins=10,position = "dodge")+
+  #ggtitle("Distribution of the percentage of the existing proteins of complexes")+
+  scale_fill_manual(values = c("Literature"="dodgerblue","Predicted"="tomato1"), name="Source")+
+  scale_x_continuous(position = "bottom",breaks = seq(0,1,0.1))+
+  scale_y_continuous(position = "left", breaks = seq(0,900,100))+
+  labs(x="% of complex completeness", y="frequency")+
+  theme_bw()+
+  theme(legend.position = c(0.1,0.88))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Histogram_Complex_Completeness_in_network.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+Here we present the distribution of the value of missing proteins in each complex of the 5027 that have at least one protein appearing in the network.
+
+```{r}
+# value of missing proteins from complexes.
+compare_complexes_proteins$compare_missing <- with(compare_complexes_proteins, compare_complexes_proteins$V2-compare_complexes_proteins$Freq)
+
+compare_complexes_proteins_lit <- compare_complexes_proteins %>% filter(V3=="Literature") %>% group_by(compare_missing) %>% summarise(n=n())
+
+compare_complexes_proteins_pred <- compare_complexes_proteins %>% filter(V3=="Predicted") %>% group_by(compare_missing) %>% summarise(n=n())
+
+  
+ggplot()+
+  geom_point(data = compare_complexes_proteins_lit,aes(x = compare_missing, y = n, color="Literature"))+
+  geom_point(data = compare_complexes_proteins_pred,aes(x = compare_missing, y = n, color="Predicted"))+
+  #ggtitle("Distribution of the percentage of the existing proteins of complexes")+
+  scale_color_manual(values = c("Literature"="dodgerblue","Predicted"="tomato1"), name="Source")+
+  scale_x_continuous(position = "bottom",breaks = seq(0,100,10), limits = c(0,100),expand=c(0.015,0))+
+  scale_y_continuous(position = "left", breaks = seq(0,800,100),limits = c(0,800),expand=c(0.015,0))+
+  labs(x="number of proteins missing", y="complexes")+  
+  theme_bw()+
+  theme(legend.position = c(0.88,0.88))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Histogram_Complex_Missing_Proteins_in_network.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+
+## Complexes and proteins as bipartite network
+
+### Degree distribution
+```{r, echo=FALSE}
+
+require(tidyr)
+IDs_protein_complex <- gather(data = Protein_Complex_bipartite,key = "type",value = "vertices")
+
+IDs_protein_complex <- unique(IDs_protein_complex)
+IDs_protein_complex <- IDs_protein_complex[,c(2,1)]
+IDs_protein_complex$color <- with(IDs_protein_complex, ifelse(IDs_protein_complex$type=="Complex",paste0("green"),paste0("red")))
+
+# Net 
+protein_complexes_net <- graph_from_data_frame(d = Protein_Complex_bipartite,vertices = IDs_protein_complex,directed = F)
+
+is_connected(protein_complexes_net)
+
+protein_complexes_net_comp  <-decompose.graph(protein_complexes_net, min.vertices = 1) #upografima tis megalis sinistosas 
+
+biparti_size_comps <- as.data.frame(sapply(protein_complexes_net_comp,vcount))
+
+colnames(biparti_size_comps) <- "component_size"
+comp_dist_bipartite <- biparti_size_comps %>% group_by(component_size) %>% summarise(ncount=n())
+
+ggplot()+
+  geom_point(data = comp_dist_bipartite, aes(x = component_size, y = ncount),color="lightslateblue")+
+  scale_y_log10() +
+  scale_x_log10()+
+  coord_fixed(ratio = 1)+
+  #ggtitle("Distribution of the component sizes of the protein - complex network")+
+  labs(x="size of component", y="frequency")+
+  theme_bw()
+
+ggsave("Bipartite_Protein_Complex_Component_Size_distribution.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+protein_complexes_net_giant <-protein_complexes_net_comp[[1]]
+
+```
+
+Degree distribution of the bipartite network.
+
+```{r, echo=FALSE}
+
+V(protein_complexes_net_giant)$degree <- igraph::degree(protein_complexes_net_giant)
+
+
+protein_complexes_net_attributes <- sapply(igraph::list.vertex.attributes(protein_complexes_net_giant),function(x) igraph::get.vertex.attribute(protein_complexes_net_giant,x))
+
+protein_complexes_net_attributes <- as.data.frame(protein_complexes_net_attributes)
+
+protein_complexes_net_attributes$degree <- as.numeric(protein_complexes_net_attributes$degree)
+
+protein_complexes_net_deg_dist <-  protein_complexes_net_attributes %>% group_by(degree) %>% dplyr::summarise(count=n())
+
+protein_complexes_net_deg_dist$degree <- as.numeric(protein_complexes_net_deg_dist$degree)
+protein_complexes_net_deg_dist$count <- as.numeric(protein_complexes_net_deg_dist$count)
+
+ggplot()+
+  geom_point(data = protein_complexes_net_deg_dist, aes(x = degree, y = count ),color="orange")+
+  #ggtitle("Degree Distribution Protein - Complex Bipartite Network Proteins of Drosophila")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  labs(x="degree", y="frequency of degree")+
+  theme_bw()
+ggsave("Bipartite_Protein_Complex_Degree_distribution.pdf", width = 7,height = 11,units = "cm",plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+```{r, echo=FALSE}
+
+complexes_net_deg_dist <- protein_complexes_net_attributes %>% filter(type=="Complex") %>% group_by(degree) %>% summarise(count=n())
+
+complexes_net_deg_dist$degree <- as.numeric(complexes_net_deg_dist$degree)
+complexes_net_deg_dist$count <- as.numeric(complexes_net_deg_dist$count)
+
+proteins_net_deg_dist <- protein_complexes_net_attributes %>% filter(type=="Protein") %>% group_by(degree) %>% summarise(count=n())
+
+proteins_net_deg_dist$degree <- as.numeric(proteins_net_deg_dist$degree)
+proteins_net_deg_dist$count <- as.numeric(proteins_net_deg_dist$count)
+
+ggplot()+
+  geom_point(data = complexes_net_deg_dist, aes(x = degree, y = count,color="Complexes" ))+
+  geom_point(data = proteins_net_deg_dist, aes(x = degree, y = count ,color="Proteins"))+
+  #ggtitle("Degree Distribution of Complexes and Proteins of Drosophila")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  labs(x="degree", y="frequency of degree")+
+  scale_colour_manual(values = c("Complexes"="lightblue","Proteins"="yellow3"))+
+  theme_bw()
+ggsave("Bipartite_Protein_Complex_Degree_Distribution_Node_Type.pdf",width = 7,height = 11,units = "cm", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+### Nestedness
+
+
+```{r, eval=FALSE, warning=FALSE,message=FALSE}
+library(vegan)
+
+is_connected(protein_complexes_net_giant)
+
+adjacency_complex_protein <- as_adjacency_matrix(protein_complexes_net_giant,attr = NULL,names = T) # the adjacency has both proteins and complexes as nodes, so the matrix is square and has dimensions Proteins+Complexes
+
+adjacency_complex_protein <- as.data.frame(as.matrix(adjacency_complex_protein))
+
+proteins <- Protein_Complex_bipartite %>% distinct(Protein)
+proteins <- as.vector(proteins$Protein)
+
+complexes <- Protein_Complex_bipartite %>% distinct(Complex)
+complexes <- as.vector(complexes$Complex)
+
+# remove the complexes IDS from the rows and protein IDS from the columns. 
+adjacency_complex_protein <- adjacency_complex_protein[!rownames(adjacency_complex_protein) %in% complexes,!(colnames(adjacency_complex_protein) %in% proteins)]
+
+#adjacency_complex_protein <- as.matrix(adjacency_complex_protein)
+#adjacency_complex_protein <- as.data.frame(adjacency_complex_protein)
+
+# this function takes input a data frame.
+nestedchecker_complex_protein <- nestedchecker(adjacency_complex_protein)
+
+ddd <- nestednodf(adjacency_complex_protein) ## Takes many hours to run!!!
+#error!!!!! 
+nestedtemp_complex_protein <- nestedtemp(adjacency_complex_protein)
+
+# statistical test function : oecosimu
+library(bipartite)
+nestedness_bi <- nestedness(as.matrix(adjacency_complex_protein))
+
+#nordf
+```
+
+
+
+## Protein complexes and essentiality
+
+Since the actual functional machines are protein complexes and not individual proteins the author of the article [@Ryan2013b] explored the essentiality on the scale of protein complexes. They found that essentiality is a property of the complexes which is transmitted to it's protein components. 
+
+With the same data set from OGEE database we will check the essentiality of the complexes.
+
+```{r}
+# data from OGEE
+dros_essential2 <- read_csv(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/dros_essential2.csv",col_names = TRUE)
+
+protein_Complex_essentiality <- left_join(Protein_Complex_bipartite, dros_essential2, by=c("Protein"= "locus"))
+
+# Find the essentiality consensus of proteins from the COMPLEAT database 
+essentiality_consensus_Compleat_proteins <- 
+  protein_Complex_essentiality %>% 
+  distinct(Protein,essentiality.consensus) %>%
+  group_by(essentiality.consensus) %>%
+  dplyr::summarise(count=n())
+
+colnames(essentiality_consensus_Compleat_proteins) <- c("Essentiality consensus", "Count")
+kable(x = essentiality_consensus_Compleat_proteins)
+
+write.table(x = essentiality_consensus_Compleat_proteins, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/essentiality_consensus_Compleat_proteins.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+```
+
+There are 81 proteins from the COMPLEAT data base with unknown essentiality consensus. Next we have to estimate the essentiality fraction of each complex. That is:
+$$
+\text{Essentiality Fraction}= \dfrac{\text{Number of essential proteins in the complex}}{\text{Number of total proteins}}
+$$
+
+
+```{r}
+# Find the occurrencies of each essentiality status for the complexes based on the consensus of the proteins that each complex has. 
+complex_essentiality <- protein_Complex_essentiality %>% group_by(Complex,essentiality.consensus) %>% dplyr::summarise(n_proteins=n())
+
+# transform from long to wide format in order to make calculations for every complex
+complex_essentiality_wide <- spread(complex_essentiality,key = essentiality.consensus,value = n_proteins)
+complex_essentiality_wide[is.na(complex_essentiality_wide)] <- 0 # Make NA as 0
+
+#Make numeric
+complex_essentiality_wide[,c(2:5)] <- sapply(complex_essentiality_wide[, c(2:5)], as.numeric)
+
+complex_essentiality_wide$protein_count <- rowSums(complex_essentiality_wide[,2:5])
+
+# Calculate the essentiality fraction for each complex.
+complex_essentiality_wide <- complex_essentiality_wide %>% mutate(essentiality_fraction=Essential/protein_count) %>% ungroup()
+
+summary(complex_essentiality_wide$essentiality_fraction)
+
+table(complex_essentiality_wide$essentiality_fraction>0)
+
+# All info of complexes + essentiality
+complex_essentiality_wide_source <- complex_essentiality_wide %>% left_join(.,dros_complexes, by=c("Complex"= "V1"))
+
+write.table(complex_essentiality_wide_source, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/complex_essentiality_wide_source.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+Now we can plot but in order to visualise better we will exclude the complexes with 0 essentiality which are. There are 3991 complexes with no essential components.
+
+```{r, echo=FALSE}
+
+complex_essentiality_wide_non_zero <- complex_essentiality_wide_source %>% filter(essentiality_fraction>0)
+bins <- c("[0,0.2]", "(0.2,0.4]", "(0.4,0.6]", "(0.6,0.8]","(0.8,1]")
+
+ggplot()+
+  geom_histogram(data = complex_essentiality_wide_source, aes(x = essentiality_fraction, y = ..count.. , fill=V3),bins=5, position="dodge")+
+  #ggtitle("Distribution of the essentiality fraction of the complexes")+
+  scale_fill_manual(values = c("Literature"="dodgerblue","Predicted"="tomato1"), name="Source")+
+  scale_x_continuous(position = "bottom", labels = bins,breaks = seq(0,1,0.25), expand=c(0,0.02))+
+  scale_y_continuous(position = "left", breaks = seq(0,3000,250),expand=c(0.02,0.02))+
+  labs(x="essentiality fraction", y="complexes")+
+  theme_bw()+
+  theme(legend.position = c(0.8,0.88))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Essentiality_Fraction_Complexes.pdf", plot = last_plot(), device = "pdf",width = 10,height = 13,units = "cm", dpi = 300,path = "Figures/")
+```
+
+```{r}
+
+complex_essentiality_wide %>% filter(essentiality_fraction>0.85) %>% nrow()
+
+```
+
+```{r, warning=FALSE}
+
+pearson <- cor(complex_essentiality_wide_source$protein_count,complex_essentiality_wide_source$essentiality_fraction, method = "pearson")
+
+library(entropy)
+
+mi <- mi.empirical(rbind(complex_essentiality_wide_source$protein_count,complex_essentiality_wide_source$essentiality_fraction),unit = "log2")
+
+
+ggplot()+
+  geom_point(data = complex_essentiality_wide_source, 
+             aes(x = essentiality_fraction, 
+                 y=protein_count, color=V3),show.legend = TRUE)+
+  geom_smooth()+
+  annotate("text", size=4, x = 0.7, y = 156, label = "Correlations", hjust = 0)+
+  annotate("text", size=3.2, x = 0.71, y = 140, label = paste0("M.I = ",round(mi,3), " bits","\n", "Pearson = ", round(pearson,3)), hjust = 0)+
+  scale_y_continuous(breaks = seq(0,200,25),limits = c(0,200),expand=c(0.02,0.02))+
+  scale_colour_manual(values = c("Literature"="dodgerblue","Predicted"="tomato1"), name="Source")+
+  labs(x="Essentiality fraction", y="Complex size")+
+  theme_bw()+
+  theme(legend.position = c(0.8,0.89))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Essentiality_Fraction_and_Size_of_Complexes.pdf", plot = last_plot(), width = 10,height = 13,units = "cm", device = "pdf", dpi = 150,path = "Figures/")
+
+
+```
+
+
+### Background bootstrap in essentiality fraction
+
+For a more comprehensive comparison and examination of modularity of the complexes essentiality we performed bootstrap sampling of the essentiality fraction. **All or Nothing** claim holds for the fruit fly? Another approach would be to perform bootstrap on proteins of the complexes instead of the their essentiality fraction. 
+
+```{r, eval=FALSE, message=FALSE,warning=FALSE}
+##################### Bootstrap ###############################
+
+# ~ 8 mins to run
+
+B = 1000 # number of randomizations
+n = nrow(protein_Complex_essentiality)
+
+protein_Complex_essentiality$essentiality.consensus <- with(protein_Complex_essentiality, ifelse(essentiality.consensus=="Essential",1,0))
+
+protein_Complex_essentiality[is.na(protein_Complex_essentiality)] <- 0 # Make NA as 0
+
+bootstrap_essentiality_proteins <- as.data.frame(t(matrix(sample(protein_Complex_essentiality$essentiality.consensus, size = B * n, replace = TRUE),nrow=B, ncol=n))) # Bootstrap the proteins based on their essentiality consensus
+
+# Calculations of the essentiality franction for all the randomizations
+start.time <- Sys.time()
+
+Complex_essentiality_bootstrap_essentiality_proteins <-
+  cbind(protein_Complex_essentiality,bootstrap_essentiality_proteins) %>% 
+  dplyr::select(.,-Protein) %>%
+  group_by(Complex) %>% 
+  mutate_all(funs(as.numeric(.))) %>% 
+  summarise_all(funs(n=sum(.)/n()))
+
+end.time <- Sys.time()
+time.taken <- round(end.time - start.time,2)
+time.taken
+
+# it took Time difference of 19.78 mins !! 
+write.table(x = Complex_essentiality_bootstrap_essentiality_proteins, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Data/Complex_essentiality_bootstrap_essentiality_proteins.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+# Only complexes from literature
+
+# runs in 3 min!!! 
+
+dros_complexes_bipartite_literature <- dros_complexes_bipartite_lit %>% filter(V3=="Literature") %>% left_join(., dros_essential2, by=c("Protein"= "locus")) %>% dplyr::select(Complex, Protein, essentiality.consensus)
+
+dros_complexes_bipartite_literature$essentiality.consensus <-  with(dros_complexes_bipartite_literature, ifelse(essentiality.consensus=="Essential",1,0))
+
+dros_complexes_bipartite_literature[is.na(dros_complexes_bipartite_literature)] <- 0 # Make NA as 0
+
+# Bootstrap
+B = 1000 # number of randomizations
+n = nrow(dros_complexes_bipartite_literature)
+
+bootstrap_essentiality_proteins_literature <- as.data.frame(t(matrix(sample(dros_complexes_bipartite_literature$essentiality.consensus, size = B * n, replace = TRUE),nrow=B, ncol=n))) # Bootstrap the proteins based on their essentiality consensus
+
+# Calculations of the essentiality franction for all the randomizations
+start.time <- Sys.time()
+
+Complex_essentiality_bootstrap_essentiality_proteins_literature <-
+  cbind(dros_complexes_bipartite_literature,bootstrap_essentiality_proteins_literature) %>% 
+  dplyr::select(.,-Protein) %>%
+  group_by(Complex) %>% 
+  mutate_all(funs(as.numeric(.))) %>% 
+  summarise_all(funs(n=sum(.)/n()))
+
+end.time <- Sys.time()
+time.taken <- round(end.time - start.time,2)
+time.taken
+
+write.table(x = Complex_essentiality_bootstrap_essentiality_proteins_literature, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Data/Complex_essentiality_bootstrap_essentiality_proteins_literature.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+Complex_essentiality_bootstrap_essentiality_proteins <- read_csv(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Data/Complex_essentiality_bootstrap_essentiality_proteins.csv",col_names = TRUE)
+
+Complex_essentiality_bootstrap_essentiality_proteins_literature <- read_csv(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Data/Complex_essentiality_bootstrap_essentiality_proteins_literature.csv",col_names = TRUE)
+```
+
+
+We will use the log ratio for the comparison of the bootstraped distribution with the real distribution. 
+
+$$
+\text{Log Ratio}= {\text{Log}_{2}} (\dfrac{\text{Observed essentiality fraction}}{\text{Expected essentiality fraction}})
+$$
+
+```{r, message=FALSE, warning=FALSE}
+# All complexes
+# binning
+
+d_BINS_Complex_essential <- Complex_essentiality_bootstrap_essentiality_proteins %>% dplyr::select(-Complex) %>% mutate_all(funs(cut(. ,breaks = c(-0.0001,0.2,0.4,0.6,0.8,1)))) %>% gather() %>% group_by(key, value) %>% summarise(n=n())
+
+d_BINS_Complex_essential$value <- gsub("(-0.0001,0.2]", "[0,0.2]", d_BINS_Complex_essential$value, fixed = TRUE)
+
+d_essential <- d_BINS_Complex_essential %>% filter(key=="essentiality.consensus_n")
+
+d_bootstrap <- d_BINS_Complex_essential %>% filter(key!="essentiality.consensus_n") %>% group_by(value) %>% summarise(mean_bootstrap=mean(n))
+
+## Log ratio 
+d_essential_boot <- left_join(d_essential,d_bootstrap,by=c("value"="value")) %>% mutate(log_ratio=log(n/mean_bootstrap,base = 2))
+
+d_essential_boot$key <- "All_complexes"
+# Literature
+
+d_literature <- Complex_essentiality_bootstrap_essentiality_proteins_literature %>% dplyr::select(-Complex) %>% mutate_all(funs(cut(. ,breaks = c(-0.0001,0.2,0.4,0.6,0.8,1)))) %>% gather() %>% group_by(key, value) %>% summarise(n=n())
+
+d_literature$value <- gsub('(-0.0001,0.2', '[0,0.2', d_literature$value, , fixed = TRUE)
+
+d_essential_literature <- d_literature %>% filter(key=="essentiality.consensus_n")
+
+d_bootstrap_literature <- d_literature %>% filter(key!="essentiality.consensus_n") %>% group_by(value) %>% summarise(mean_bootstrap=mean(n))
+
+## Log ratio 
+d_essential_boot_literature <- left_join(d_essential_literature,d_bootstrap_literature,by=c("value"="value")) %>% mutate(log_ratio=log(n/mean_bootstrap,base = 2))
+
+d_essential_boot_literature$key <- "Literature"
+
+# Combine
+
+d_bind <- rbind(d_essential_boot,d_essential_boot_literature)
+
+write.table(x = d_bind, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/Complex_essentiality_bootstrap_and_literature_BINS.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+```
+
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+d_bind$value <- factor(as.character(d_bind$value), levels=unique(d_bind$value)) # for the correct order
+
+ggplot()+
+  geom_bar(data = d_bind, aes(x = value, y = log_ratio, fill=key),stat = "identity", position = "dodge")+
+  #ggtitle("Distribution of the bootstrap essentiality fraction of drosophila complexes")+
+  scale_y_continuous(breaks = seq(-2.5,2.5,by = 0.5))+
+  scale_fill_manual(values = c("Literature"="dodgerblue","All_complexes"="tomato1"), name="Source")+
+  labs(x="essentiality fraction ", y=expression(Log[2](Obs/Exp)))+
+  theme_bw()+
+  theme(legend.position = c(0.88,0.88))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Essentiality_Fraction_Complexes_Bootstrap.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+Significance test for each bin. We have a distribution for each bin so it is possible to calculate the p-value for each one in respect to the odserved value.
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE}
+
+# Cumulative distribution estimation for each bin of the bootstraped values
+
+d_essential_test <- d_BINS_Complex_essential %>% filter(key=="essentiality.consensus_n") %>% mutate(complexes="All")
+
+d_bootstrap_cumulative <- d_BINS_Complex_essential %>% filter(key!="essentiality.consensus_n") %>% group_by(value, n) %>% summarise(count=n()) %>% mutate(count_percent = count/sum(n),cumsum=cumsum(count), cumsum_percent = cumsum/max(cumsum)) %>% mutate(complexes="All")
+
+d_bootstrap_boxplot <- d_BINS_Complex_essential %>% filter(key!="essentiality.consensus_n") %>% ungroup() %>% mutate(complexes="All")
+
+# Literature
+
+d_essential_test_literature <- d_literature %>% filter(key=="essentiality.consensus_n") %>% mutate(complexes="Literature")
+
+d_bootstrap_cumulative_literature <- d_literature %>% filter(key!="essentiality.consensus_n") %>% group_by(value, n) %>% summarise(count=n()) %>% mutate(count_percent = count/sum(n),cumsum=cumsum(count), cumsum_percent = cumsum/max(cumsum)) %>% mutate(complexes="Literature")
+
+d_bootstrap_boxplot_literature <- d_literature %>% filter(key!="essentiality.consensus_n") %>% ungroup() %>% mutate(complexes="Literature")
+
+# Merge together
+
+d_essential_merged <- rbind(d_essential_test,d_essential_test_literature)
+d_bootstrap_cumulative_merged <- rbind(d_bootstrap_cumulative,d_bootstrap_cumulative_literature)
+d_bootstrap_boxplot_merged <- rbind(d_bootstrap_boxplot,d_bootstrap_boxplot_literature)
+
+# P values
+d_bootstrap_test_1 <- d_BINS_Complex_essential %>% filter(key!="essentiality.consensus_n" & value=="[0,0.2]") %>% ungroup()
+
+d_bootstrap_test_2 <- d_BINS_Complex_essential %>% filter(key!="essentiality.consensus_n" & value=="(0.2,0.4]") %>% ungroup()
+
+d_bootstrap_test_3 <- d_BINS_Complex_essential %>% filter(key!="essentiality.consensus_n" & value=="(0.4,0.6]") %>% ungroup()
+d_bootstrap_test_3_l <- d_bootstrap_boxplot_literature %>% filter(key!="essentiality.consensus_n" & value=="(0.4,0.6]") %>% ungroup()
+
+d_bootstrap_test_4_lit <- d_bootstrap_boxplot_literature %>% filter(key!="essentiality.consensus_n" & value=="(0.6,0.8]") %>% ungroup()
+
+d_bootstrap_test_4 <- d_BINS_Complex_essential %>% filter(key!="essentiality.consensus_n" & value=="(0.8,1]") %>% ungroup()
+
+pval1 <- round(sum(d_bootstrap_test_1$n >= 4893)/length(d_bootstrap_test_1$n),10)
+
+pval2 <- sum(d_bootstrap_test_2$n <= 222)/length(d_bootstrap_test_2$n)
+pval3 <- sum(d_bootstrap_test_3$n >= 173)/length(d_bootstrap_test_3$n)
+pval3_l <- sum(d_bootstrap_test_3_l$n <= 37)/length(d_bootstrap_test_3_l$n)
+
+pval4_lit <- sum(d_bootstrap_test_4_lit$n >= 9)/length(d_bootstrap_test_4_lit$n)
+
+```
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+ggplot()+
+  geom_step(data=d_bootstrap_cumulative_merged,aes(x=n, y=cumsum_percent, color=complexes),show.legend = T)+
+  facet_wrap(~value, scales = "free",ncol = 2) +
+  geom_vline(data = d_essential_merged, aes( xintercept = n, color=complexes),show.legend = T)+
+  #ggtitle("Manual implementation of cumulative distribution")+
+  scale_colour_manual(values = c("Literature"="dodgerblue","All"="tomato1"))+
+  labs(y="Cumulative % essentiality fraction of complex", x= "Number of complexes")+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Essentiality_Fraction_Manual_Cumulative_Dist_Complexes_Bootstrap.pdf", plot = last_plot(), device = "pdf", dpi = 150,width = 20, height = 24, units = "cm", path = "Figures/")
+```
+
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+
+
+ggplot()+
+  stat_ecdf(data=d_bootstrap_boxplot_merged,aes(x=n, color=complexes),geom = "step",show.legend =T)+
+  facet_wrap(~value, scales = "free", ncol=2) +
+  geom_vline(data = d_essential_merged, aes( xintercept = n, color=complexes),show.legend = T)+
+  #ggtitle("Ggplot implementation of cumulative distribution")+
+  scale_colour_manual(values = c("Literature"="dodgerblue","All"="tomato1"), name="Source")+
+  labs(y="Cumulative % essentiality fraction of complex", x= "Number of complexes")+
+  theme_bw()+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Essentiality_Fraction_Ggplot_Cumulative_Dist_Complexes_Bootstrap.pdf", plot = last_plot(), device = "pdf", dpi = 150,width = 20, height = 24, units = "cm",path = "Figures/")
+```
+
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+ggplot()+
+  geom_boxplot(data = d_bootstrap_boxplot_merged, 
+               aes(x =value , y = n, color=complexes), width=0.2)+
+  geom_point(data = d_essential_test, aes(x = value, y = n ), color="black")+
+  labs(x="Protein essentiality fraction of complex", y= "Number of complexes")+
+  scale_colour_manual(values = c("Literature"="dodgerblue","All"="tomato1"))+
+  #guides(color=FALSE)+
+  facet_wrap(~value, scales = "free") +
+  theme_bw()
+
+ggsave("Essentiality_Fraction_Boxplot_Complexes_Bootstrap.pdf", plot = last_plot(), device = "pdf", dpi = 150,width = 20, height = 24, units = "cm",path = "Figures/")
+```
+
+
+## Protein complexes in the signed PPI network of drosophila
+
+In this section we will focus on the complexes that are fully represented by the protein in the PPI network of drosophila.
+
+```{r, echo=FALSE}
+
+dros_complete_complexes_included <- complex_essentiality_wide %>% filter(Complex %in% complete_complexes$Var1) %>% left_join(.,complete_complexes, by=c("Complex"="Var1"))
+
+ggplot()+
+  geom_histogram(data = dros_complete_complexes_included, aes(x = essentiality_fraction, y = ..count.., fill=V3 ),bins=5, position = "dodge")+
+  #ggtitle("Distribution of the essentiality fraction of the complexes in drosophila signed PPI")+
+  scale_fill_manual(values = c("Literature"="dodgerblue","Predicted"="tomato1"), name="Source")+
+  scale_x_continuous(position = "bottom",breaks = seq(0,1,0.2), expand=c(0.025,0))+
+  scale_y_continuous(position = "left", breaks = seq(0,300,50),limits = c(0,300),expand=c(0.015,0))+
+  labs(x="essentiality fraction", y="number of complete complexes in the signed PPI network")+
+  theme_bw()+
+  theme(legend.position = c(0.88,0.88))+
+  theme(panel.grid.minor = element_blank(), panel.grid.major = element_blank())
+
+
+ggsave("Essentiality_Fraction_Histogram_Complexes_in_Network.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+
+```{r}
+dros_complete_complexes_included %>% filter(essentiality_fraction > 0.5) %>% nrow()
+
+
+```
+
+Forty nine protein complexes, from the 585 complexes that are complete in the signed network of drosophila, consist of 50% or more essential proteins.
+
+## Network contraction with protein complexes
+
+To contract a network with complexes from the protein - protein interaction network it is necessery to determine the which complexes to use. The rule we applied in this instance is to use only the complexes that all of their proteins are present in the network. This resulted in 585 complexes. Others can use a different threshold, like to use complexes that have >80% of their proteins present. Or take a completely different approach, like using GO annotation in the original network for the selection of complexes.   
+
+```{r}
+# complexes their containing proteins that are fully represented in the drosophila network
+dros_net_complete_complex_protein <- as.data.frame(Protein_Complex_bipartite[Protein_Complex_bipartite$Complex %in% complete_complexes$Var1, ])
+
+dros_net_complete_complex_protein %>% distinct(Protein) %>% nrow()
+
+```
+There are 1063 proteins that make the 585 complexes. About the 1/3 nodes from the original network.
+
+```{r, warning=FALSE}
+# keep only the interactions between proteins that both exist in complete complexes.
+dros_net <- read_csv(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/dros_net.csv",col_names = T)
+
+dros_net_protein_in_complex <- as.data.frame(dros_net[dros_net$ID1 %in% dros_net_complete_complex_protein$Protein & dros_net$ID2 %in% dros_net_complete_complex_protein$Protein,])
+```
+
+There are also 2123 edges between these 1063 proteins. So again the 1/3 of the original network.
+
+```{r}
+
+#Input
+edgelist <- dros_net_protein_in_complex
+
+complex_protein_bipartite <- dros_net_complete_complex_protein
+
+#Processing
+complexes_edgelist <- c()
+
+
+for(i in 1:nrow(edgelist)) {
+  
+  protein_out <- edgelist[i,1]
+  protein_in <- edgelist[i,2]
+  edge_weight <- edgelist[i,4]
+  edge_IDs <- edgelist[i,10]
+
+  complexes_protein_out <- complex_protein_bipartite %>% filter(Protein == protein_out) # Which complexes have this protein. The out edge.
+  
+  complexes_protein_in <- complex_protein_bipartite %>% filter(Protein == protein_in)
+  # Which complexes have this protein, the in edge.
+  
+  #Make all the possible combinations of the complexes but keeping them in different columns so the oriantation of the original link remains. 
+  complexes_edgelist[[i]] <- expand.grid(ID1=complexes_protein_out$Complex,ID2=complexes_protein_in$Complex, weight=edge_weight, original_edge = edge_IDs)
+  
+}
+
+#It isn’t that the for-loop is slow (which many R users mistakingly believe), it is the incremental collection of results into a data frame is slow and that is one of the steps the lapply method is avoiding.
+
+#Output
+
+complexes_edgelist <- do.call(rbind, complexes_edgelist)
+
+```
+
+Now that we created the edgelist but it is important to eliminate the redundant edges. These are:
+
+1. Duplicated edges
+2. Self loops
+
+But we want to keep as much information as possible so we will treat positive and negative edges independently. More specifically, from all the redundant edges with the same direction, we will keep 2, one positive and one negative. The weight of the positive edge will be the normalized weight from all the positive edges. We' ll repeat that for the negative edges. Finally we will normalize all the weights with maximun weight, absolute value, in order to have all the edge weights in the [-1,1].
+
+```{r}
+complexes_edgelist_processed <- complexes_edgelist %>% filter(!ID1==ID2)
+
+positive_e <- complexes_edgelist_processed %>% filter(weight>=0) %>% group_by(ID1,ID2) %>% summarise(mean_weights=mean(weight))
+
+negative_e <- complexes_edgelist_processed %>% filter(weight<=0) %>% group_by(ID1,ID2) %>% summarise(mean_weights=mean(weight))
+
+complexes_edgelist_final <- rbind(positive_e,negative_e)
+
+complexes_edgelist_final <- complexes_edgelist_final %>% mutate(complex_edge = paste0(ID1,",",ID2)) %>% mutate(norm_weights= mean_weights/max(abs(complexes_edgelist_final$mean_weights)))
+
+# determine which are duplicates because there are negative and positive edges
+complexes_edgelist_final <- complexes_edgelist_final %>% mutate(duplicates=duplicated(complex_edge)|duplicated(complex_edge,fromLast = T))
+
+qqq <- complexes_edgelist_final %>% group_by(ID1,ID2) %>% summarise(count=n()) %>% group_by(count) %>% summarise(count_count=n())
+
+
+### Counting links
+
+posi <- complexes_edgelist_final %>% filter(norm_weights>0) %>% nrow()
+
+only_posi <- complexes_edgelist_final %>% filter(duplicates=="FALSE" & norm_weights>0) %>% nrow()
+
+nega <- complexes_edgelist_final %>% filter(norm_weights<0) %>% nrow()
+
+only_nega <- complexes_edgelist_final %>% filter(duplicates=="FALSE" & norm_weights<0) %>% group_by(ID1,ID2) %>% distinct() %>% nrow()
+
+
+total_both <- complexes_edgelist_final %>% filter(duplicates=="TRUE") %>% nrow()
+#which edges appear with negative AND positive weights
+unique_both <- complexes_edgelist_final %>% filter(duplicates=="TRUE") %>% group_by(complex_edge) %>% distinct() %>% nrow()
+
+```
+
+
+```{r, echo=FALSE}
+
+type <- c("Positive edges", "Negative edges","Total")
+Total <- c(posi,nega,nrow(complexes_edgelist_final))
+Unique_edges <- c(only_posi, only_nega,  only_posi+only_nega)
+Both_signs <- c(posi-only_posi, nega-only_nega, total_both)
+complex_edgelist_table <- as.data.frame(cbind(type,Unique_edges,Both_signs,Total))
+
+colnames(complex_edgelist_table) <- c("Type","Unique edges","Both signs","Total")
+
+caption_complex_edgelist_table <- "Signed edges of complexes network"
+kable(complex_edgelist_table,caption=caption_complex_edgelist_table, align = 'c')
+
+write.table(x = complex_edgelist_table, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/complex_edgelist_table.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+## Protein complexes network
+
+
+```{r}
+#complexes_edgelist_final
+
+```
+
+```{r, echo=FALSE}
+rm(list = setdiff(ls(), c("gcomp_attributes","dros_essential", "dros_network_genes", "dros_net", "Protein_Complex_bipartite", "complex_essentiality_wide_source", "d_bootstrap_boxplot_merged", "dros_complexes")))
+
+```
+
+# Gene ontology and Functional enrichment analysis
+
+Have to do gene annotation and after that, biological process annotation for the functional categories in GO. The latter has to be accompanied with a statistical test. 
+
+In cytoscape app Bingo is possible to make gene annotation from GO. I followed the instructions from the [tutorial](http://www.psb.ugent.be/cbd/papers/BiNGO/Tutorial.html) and managed to annotate the drosophila genes. It performs an hypergeometric test for the selection and the output is a graph (and a table) with the GO terms and their parent-child directed connections accompanied with p-value.
+
+```{r,eval=FALSE,warning=FALSE,message=FALSE}
+
+## this chunk doesn't run because: eval=FALSE
+## export data for the Cytoscape app Bingo.
+
+flybase_annotation <- read.delim(file = "Data/gene_association.fb.gz.txt",header = F,sep = "\t")#
+
+dros_net_FLYBASE <- transform(dros_net, ID1=sprintf('FLYBASE:%s',ID1)) # needs the database name before the ID
+dros_net_FLYBASE <- transform(dros_net, ID2=sprintf('FLYBASE:%s',ID2))
+ONLYessential_genes_net2 <- read_csv(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/ONLYessential_genes_net.txt",col_names = TRUE)
+
+colnames(ONLYessential_genes_net2)[colnames(ONLYessential_genes_net2)=="ID1"] <- "source"
+colnames(ONLYessential_genes_net2)[colnames(ONLYessential_genes_net2)=="ID2"] <- "target"
+ONLYessential_genes_net2 <- transform(ONLYessential_genes_net2, source=sprintf('FLYBASE:%s',source))
+ONLYessential_genes_net2 <- transform(ONLYessential_genes_net2, target=sprintf('FLYBASE:%s',target))
+
+
+
+library(mygene)
+ssss <- tail(dros_net$ID1)
+#qqqq <- getGenes(ssss,fields =  "all",return.as = "DataFrame")
+
+# Export network to Cytoscape to use BINGO for gene enrichment. 
+dros_net_cytoscape <- dros_net[,c(1,2,12,15,16)]
+dros_net_cytoscape <- transform(dros_net_cytoscape, ID1=sprintf('FLYBASE:%s',ID1))
+dros_net_cytoscape <- transform(dros_net_cytoscape, ID2=sprintf('FLYBASE:%s',ID2))
+
+names(dros_net_cytoscape) <- c("source","target","norm_weights","source_essentiality","target_essentiality")
+write.table(dros_net_cytoscape,file = "dros_net_cytoscape.txt",sep = "\t",col.names = T,row.names = F,quote = F)
+
+```
+
+## Gene ontology annotation
+
+The Bioconductor has packages in R that do Gene Ontology annotation in genes of many organisms with different types of database IDs. 
+
+```{r, message=FALSE, warning=FALSE}
+library(AnnotationDbi)
+library(org.Dm.eg.db)
+library(GO.db)
+
+columnsDB <- columns(org.Dm.eg.db)
+keysDB <- head(keys(org.Dm.eg.db, keytype = "FLYBASE"))
+dros_IDs_Flybase <- as.vector(dros_network_genes$locus)
+dros_network_genes_ANNOTATION <- AnnotationDbi::select(org.Dm.eg.db, keys=dros_IDs_Flybase, columns=c("GO","GENENAME","PATH","ONTOLOGY"),keytype = "FLYBASE")
+
+# What is evidence? Why there are many GO ids to single Fly ID?
+
+```
+
+
+```{r, echo=FALSE}
+
+ALL_ANNOTATIONS <- dros_network_genes_ANNOTATION %>% group_by(FLYBASE, ONTOLOGY) %>% distinct() %>% spread(key = ONTOLOGY,value = ONTOLOGY,fill = NA) %>% unite(col = ONTOLOGIES, BP, MF,CC,sep = ";")
+
+
+Evidence_summarise <- dros_network_genes_ANNOTATION %>% group_by(EVIDENCE) %>% summarise(counts=n())
+# 
+ALL_ANNOTATIONS_ONTOLOGY_summarise <- dros_network_genes_ANNOTATION %>% group_by(FLYBASE,ONTOLOGY) %>% distinct() %>% group_by(ONTOLOGY) %>% summarise(Counts=n())
+ALL_ANNOTATIONS_ONTOLOGY_summarise[is.na(ALL_ANNOTATIONS_ONTOLOGY_summarise)] <- "None"
+colnames(ALL_ANNOTATIONS_ONTOLOGY_summarise) <- c("Ontology", "Number of annotations")
+
+ALL_ANNOTATIONS_summarise <- dros_network_genes_ANNOTATION %>% group_by(FLYBASE,ONTOLOGY) %>% distinct()
+
+ALL_ANNOTATIONS_summarise[is.na(ALL_ANNOTATIONS_summarise)] <- "None"
+
+ALL_ANNOTATIONS_summarise1 <- ALL_ANNOTATIONS_summarise %>% filter(ONTOLOGY!="None") %>% group_by(FLYBASE) %>% summarise(ONTOLOGIES=n())
+
+ALL_ANNOTATIONS_summarise2 <- ALL_ANNOTATIONS_summarise %>% filter(ONTOLOGY=="None") %>% group_by(FLYBASE) %>% summarise(ONTOLOGIES=0)
+
+ALL_ANNOTATIONS_counts <- rbind(ALL_ANNOTATIONS_summarise1,ALL_ANNOTATIONS_summarise2)
+
+ONTOLOGY_counts_summarise <- ALL_ANNOTATIONS_counts %>% group_by(ONTOLOGIES) %>% summarise(gene_counts=n())
+colnames(ONTOLOGY_counts_summarise) <- c("Number of ontologies", "Number of genes")
+
+dros_network_genes_ANNOTATION_BP <- dros_network_genes_ANNOTATION %>% filter(ONTOLOGY=="BP")
+
+BP_summarise <- dros_network_genes_ANNOTATION_BP %>% group_by(EVIDENCE) %>% summarise(n_counts=n())
+
+BP_ANNOTATIONS <- dros_network_genes_ANNOTATION_BP %>% group_by(FLYBASE) %>% summarise(n_counts=n())
+
+```
+
+From the 3352 proteins of the network the 317 are not included in Gene Ontology. For some genes there are multiple annotations because there exist three ontologies, Biological Process, Molecular Function and Cellular Component, and also 15 different evidence methods. 
+
+```{r, echo=FALSE}
+caption_ontologies_count <- "Number of annotations for each ontology from GO"
+kable(ALL_ANNOTATIONS_ONTOLOGY_summarise, caption = caption_ontologies_count, align = 'c')
+
+write.table(x = ALL_ANNOTATIONS_ONTOLOGY_summarise, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/ALL_ANNOTATIONS_ONTOLOGY_summarise.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+
+
+```{r, echo=FALSE}
+caption_ontology <- "Number of ontologies which the genes were annotated to"
+kable(ONTOLOGY_counts_summarise,caption=caption_ontology, align = 'c')
+
+write.table(x = ONTOLOGY_counts_summarise, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/ONTOLOGY_counts_summarise.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+## Identifier conversion with Bioconductor
+
+In the bioconductor package org.Dm.eg.db there are multiple functions, one for each corresponding identifier. In this particular instance we will convert ids from Flybase to Entrez gene. 
+
+```{r}
+
+## Find different IDs of Drosophila
+
+x <- org.Dm.egFLYBASE
+# Get the entrez gene identifiers that are mapped to a Flybase ID
+mapped_genes <- mappedkeys(x)
+
+flybase_to_entrez <- as.list(x[mapped_genes])
+sum(sapply(X = flybase_to_entrez,FUN = length))== length(flybase_to_entrez) # it's true so the list has 1 element in every cell of the list. 
+
+flybase_to_entrez_df <- as.data.frame(do.call(rbind,flybase_to_entrez))
+flybase_to_entrez_df <- tibble::rownames_to_column(df = flybase_to_entrez_df,var = "Entrez_ID")
+
+```
+
+
+Finally we have a dataframe with 2 columns with the matching identifiers.
+
+Next we will subset the genes from the network with the entrez gene identifiers because these are recognisable from the topGO package for the functional enrichment analysis.
+
+```{r, warning=FALSE}
+all_drosophila_genes_DATABASE <- as.character(flybase_to_entrez_df$Entrez_ID)
+all_genes <- as.character(dros_network_genes$locus) # Gene Universe
+all_net_strong_comp <- as.vector(as.matrix(read_csv(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/giant_component_strong_component882.csv",col_names = F)))
+intresting_genes_Essential_strongly_con <- as.vector(as.matrix(read_csv(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/strong_comp_essential_nodes.csv",col_names = F))) # essential strongly connected
+intresting_genes_Essential <- as.vector(as.matrix(read_csv(file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/g_ONLY_essential_giant.csv",col_names = F)))
+
+
+dros_net_flybase_to_entrez_df <- flybase_to_entrez_df %>% filter(V1 %in% all_genes) # a lot are missing!! 96 genes
+all_strong_dros_net_flybase_to_entrez_df <- flybase_to_entrez_df %>% filter(V1 %in% all_net_strong_comp) # strongly connected comp. 4 missing
+essential_dros_net_flybase_to_entrez_df <- flybase_to_entrez_df %>% filter(V1 %in% intresting_genes_Essential) # essential strongly connected
+
+# vectors
+universe_dros_net_entrez <- as.factor(dros_net_flybase_to_entrez_df$Entrez_ID)
+essential_dros_net_entrez <- as.factor(essential_dros_net_flybase_to_entrez_df$Entrez_ID)
+strong_dros_net_entrez <- as.factor(all_strong_dros_net_flybase_to_entrez_df$Entrez_ID)
+
+```
+
+There are some identifiers that did not match. These are `r length(all_genes)-nrow(dros_net_flybase_to_entrez_df)` genes. All the essential 20 genes that form a strongly connected component are matched. For the big strongly connected component 4 genes weren't matched.
+
+## Singular enrichment analysis
+
+In order to examine which gene ontology terms are overrepresented in the genes of our network we have to do a statistic test. Most commonly used tests is the Fisher's exact test, the chi squere test and the binomial test. We will use the Fisher' s exact test for the Biological Process component of Gene Ontology.
+
+All these test share the same assumption for the null hypothesis, that the probabilities for the selection of each gene are equal [@Rivals2007]. But it turns out that thay are not because the structure of gene ontology bipartite network of genes and gene terms has a heavy tail distribution and hence these tests are biased to high degree terms [@Glass2014]. 
+
+### The essential cluster
+
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+library(topGO)
+library(Rgraphviz)
+#library(BioNet)
+library(GSEABase)
+#GOprofiles
+#GSEABase
+#GOstats
+
+#### The data and the preparation necessary to load to topGO object.
+#universe_dros_net_entrez  # Gene Universe
+
+#essential_dros_net_entrez # genes of interest
+
+# then make a factor that is 1 if the probeset is "interesting" and 0 otherwise
+geneList_dros <- as.integer(universe_dros_net_entrez %in% essential_dros_net_entrez)
+# name the factor with the probeset names
+names(geneList_dros) <- universe_dros_net_entrez
+
+# Make the topGO object with the data
+sampleGOdata <- new("topGOdata", description = "Simple session", ontology = "BP", allGenes = as.factor(geneList_dros), nodeSize = 5,annot = annFUN.org, mapping="org.Dm.eg.db", ID="entrez")
+
+# Run the tests
+resultFisher <- runTest(sampleGOdata, algorithm = "classic", statistic = "fisher") # the p-values are not adjusted!!!!
+
+ss <- resultFisher@score[resultFisher@score<0.01]
+#resultKS <- runTest(sampleGOdata, algorithm = "classic", statistic = "ks")
+#resultKS.elim <- runTest(sampleGOdata, algorithm = "elim", statistic = "ks")
+
+############################################# Analysis of results #####################################################
+
+# Dataframe with top GO
+allRes <- GenTable(sampleGOdata, classicFisher = resultFisher, ranksOf = "classicFisher", orderBy = "classicFisher",topNodes = length(resultFisher@score))
+allRes$classicFisher <- as.numeric(allRes$classicFisher)
+
+allRes$classicFisher <- with(allRes,ifelse(is.na(classicFisher),0,classicFisher))
+p <- as.numeric(allRes$classicFisher)
+
+allRes$p_adjust_FDR <- p.adjust(p,method ="fdr",n = length(p))
+allRes$p_adjust_Bonferroni <- p.adjust(p,method ="bonferroni",n = length(p))
+
+
+write.table(x = allRes, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Data/biological_process_enrichment_termFisher.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+
+
+allRes_001_sig <- allRes[as.numeric(allRes$classicFisher)<0.01,]
+
+# pValue.classic <- score(resultFisher)
+# pValue.elim <- score(resultKS.elim)[names(pValue.classic)]
+# gstat <- termStat(sampleGOdata, names(pValue.classic))
+# gSize <- gstat$Annotated / max(gstat$Annotated) * 4
+# 
+# # function for building color map for plotting
+# colMap <- function(x) {
+#   .col <- rep(rev(heat.colors(length(unique(x)))), time = table(x))
+#   return(.col[match(1:length(x), order(x))])}
+#   
+# gCol <- colMap(gstat$Significant)
+# # Plot the p values of the different algorithms classic and elim
+# plot(pValue.classic, pValue.elim, xlab = "p-value classic", ylab = "p-value elim", pch = 19, cex = gSize, col = gCol)
+# sel.go <- names(pValue.classic)[pValue.elim < pValue.classic]
+# cbind(termStat(sampleGOdata, sel.go),elim = pValue.elim[sel.go],classic = pValue.classic[sel.go])
+
+####################################### Plot GO graph #########################################
+
+graph_GO_essential_strongly <- showSigOfNodes(sampleGOdata, score(resultFisher), firstSigNodes = 53, useInfo = 'all')
+# it induces the GO graph with the quered IDs. 
+graph_GO_essential_strongly
+
+graph_GO_essential_strongly_igraph <- graph_from_graphnel(graph_GO_essential_strongly$dag, name = TRUE, weight = TRUE,
+  unlist.attrs = TRUE)
+
+
+# pdf(file = "GO_graph_sign.pdf", width = 10,height = 10)
+# 
+# dev.off()
+# This has to be done also for big strongly connected component
+
+
+```
+
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+ggraph(graph_GO_essential_strongly_igraph, 'igraph', algorithm = 'tree') + 
+  geom_edge_link(edge_width=0.2, arrow = arrow(length = unit(0.8, 'mm')), 
+                   end_cap = circle(0.8, 'mm'), aes(),colour = "steelblue") + 
+  geom_node_point(size=0.5, aes(),color="red")+
+  geom_node_text(aes(label = name), color = 'black', size = 3) +
+  #ggtitle("GO graph of the significant terms of essential cluster")+
+  theme_graph()+
+  theme(text=element_text(size=10, family="Courier"))+
+  theme(plot.title = element_text(size=12, vjust=1,family="Courier"))
+
+ggsave("GO_graph_significant_terms_essential_cluster.pdf", plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+
+```
+
+#### Functional Bipartite Network
+
+After the enrichment of the significantly represented gene ontology terms we can construct a bipartite network with the genes and the GO terms. That way it is possible to decipher functional relationships between GO terms as well as genes. 
+```{r, warning=FALSE}
+#sdsds <- dros_network_genes_ANNOTATION[dros_network_genes_ANNOTATION$FLYBASE %in% intresting_genes_Essential,]
+
+# #################################  Bipartite network
+allRes_001_sig_IDS <- allRes_001_sig[,"GO.ID"] # the significant GO ids. 
+genesInTerm_essential_strong <- genesInTerm(sampleGOdata,allRes_001_sig_IDS) # which genes where annotated to these GO ids from the gene universe.
+
+genesInTerm_essential_strong <- lapply(genesInTerm_essential_strong,paste0,collapse = ",") # Concarnate the IDs so each GO id has 1 element, a joined string of gene Ids. 
+
+sig_GO_toEntrez_Essential <- as.data.frame(do.call(rbind,genesInTerm_essential_strong)) %>% tibble::rownames_to_column(.,var = "GO_ID") %>% 
+    mutate(.,V1=strsplit(as.character(V1), ",")) %>% 
+    unnest(.,V1)
+
+colnames(sig_GO_toEntrez_Essential) <- c("GO_ID","Entrez_ID")
+
+bipartite_GO_Gene_essential_strong <- sig_GO_toEntrez_Essential %>% subset(.,Entrez_ID %in% essential_dros_net_entrez)
+
+# Attributes dataframe
+essential_strong_gene_attributes <- left_join(dros_network_genes_ANNOTATION, dros_net_flybase_to_entrez_df,by=c("FLYBASE"="V1")) %>% subset(., Entrez_ID %in% unique(bipartite_GO_Gene_essential_strong$Entrez_ID)) %>% dplyr::select(.,c(GENENAME, Entrez_ID)) %>% group_by(GENENAME, Entrez_ID) %>% distinct() %>% ungroup()
+
+essential_strong_gene_attributes <- essential_strong_gene_attributes[,c(2,1)] %>% mutate(.,Type="Entrez_ID")
+colnames(essential_strong_gene_attributes) <- c("ID", "Term","Type")
+
+allRes_001_sig_ID_Term <- allRes_001_sig[,c(1,2)]  %>% mutate(.,Type="GO_ID")
+colnames(allRes_001_sig_ID_Term) <- c("ID", "Term", "Type")
+
+bipartite_GO_Gene_essential_strong_attributes <- as.data.frame(do.call("rbind",list(allRes_001_sig_ID_Term,essential_strong_gene_attributes)))
+
+### Complete the edgelist ### 
+bipartite_GO_Gene_essential_strong_edgelist_full <- left_join(bipartite_GO_Gene_essential_strong, bipartite_GO_Gene_essential_strong_attributes, by=c("GO_ID"="ID")) %>% left_join(., bipartite_GO_Gene_essential_strong_attributes, by=c("Entrez_ID"="ID")) %>% left_join(.,dros_net_flybase_to_entrez_df, by=c("Entrez_ID"="Entrez_ID"))
+colnames(bipartite_GO_Gene_essential_strong_edgelist_full) <- c("GO_ID","Entrez_ID", "Term_GO_ID", "Type_GO_ID", "Term_Entrez_ID", "Type_Entrez_ID", "FLYBASE")
+
+#### Load the network ####
+bipartite_GO_Gene_essential_strong_g <- graph_from_data_frame(bipartite_GO_Gene_essential_strong,directed = FALSE,vertices = bipartite_GO_Gene_essential_strong_attributes)
+
+bipartite_GO_Gene_essential_strong_g_comp <- decompose.graph(bipartite_GO_Gene_essential_strong_g,min.vertices = 10)
+bipartite_GO_Gene_essential_strong_g_giant <- bipartite_GO_Gene_essential_strong_g_comp[[1]]
+
+library(bipartite)
+
+# All sig annotations without correction
+adjacency_bipartite_GO_Gene_essential_strong <- bipartite_GO_Gene_essential_strong %>% mutate(value=1) %>% spread(.,key = Entrez_ID,value = value,fill = 0) %>% tibble::remove_rownames(.) %>% tibble::column_to_rownames(.,var = "GO_ID") %>% as.matrix()
+
+Functional_net_GO_essential_cluster_adjacency <- as.one.mode(adjacency_bipartite_GO_Gene_essential_strong,project = "lower")
+
+Functional_net_GO_essential_cluster <- graph_from_adjacency_matrix(Functional_net_GO_essential_cluster_adjacency,mode = "undirected",weighted = TRUE)
+V(Functional_net_GO_essential_cluster)$Term <- allRes_001_sig$Term
+V(Functional_net_GO_essential_cluster)$Bonferroni <- allRes_001_sig$p_adjust_Bonferroni
+
+
+
+```
+
+If we use only the Bonferroni adjastement for the p-value we take 23 terms and the functional network is fully connected. So we didn't used this filter for the functional network. 
+
+```{r}
+# Bonferroni sig annotations
+GO_ids_bonferroni <- allRes_001_sig[allRes_001_sig$p_adjust_Bonferroni<0.05,]
+
+adjacency_bipartite_GO_Gene_essential_strong_bonf <- bipartite_GO_Gene_essential_strong %>% filter(., GO_ID %in% GO_ids_bonferroni$GO.ID) %>% mutate(value=1) %>% spread(.,key = Entrez_ID,value = value,fill = 0) %>% tibble::remove_rownames(.) %>% tibble::column_to_rownames(.,var = "GO_ID") %>% as.matrix()
+
+Functional_net_GO_essential_cluster_adjacency_bonf <- as.one.mode(adjacency_bipartite_GO_Gene_essential_strong_bonf,project = "lower")
+
+Functional_net_GO_essential_cluster <- graph_from_adjacency_matrix(Functional_net_GO_essential_cluster_adjacency,mode = "undirected",weighted = TRUE)
+V(Functional_net_GO_essential_cluster)$Term <- allRes_001_sig$Term
+V(Functional_net_GO_essential_cluster)$Bonferroni <- allRes_001_sig$p_adjust_Bonferroni
+```
+
+
+```{r, echo=F}
+#pdf(file = "Functional_net_GO_essential_cluster.pdf")
+ggraph(Functional_net_GO_essential_cluster,layout = 'fr') + 
+  geom_edge_link(edge_width=0.3, colour = "dodgerblue") + 
+  geom_node_point(size=2, colour = "firebrick1",show.legend=F)+
+  geom_node_label(aes(label = as.factor(Term),family="Times"), color = 'black', size = 2, repel=TRUE,show.legend=F) +
+  #scale_color_manual(values=c("Outside component"="firebrick2", "Strongly connected component"="slateblue3"), name="Components")+
+  #ggtitle("Functional network of essential protein cluster")+
+  theme_graph()+
+  #theme(text=element_text(size=8, family="Times"))+
+  theme(plot.title = element_text(size=10, vjust=1,family="Times"))
+
+#dev.off()  
+  
+ggsave("Functional_net_GO_essential_cluster.pdf", plot = last_plot(), device = "pdf",width = 25, height = 20, units ="cm", dpi = 300,path = "Figures/")
+
+```
+
+The original gene list had 36 essential genes that their proteins were positively interacting with each other. After the gene set enrichement we are left with 34 genes because the genes `r setdiff(essential_dros_net_entrez,unique(bipartite_GO_Gene_essential_strong$Entrez_ID))` weren't enriched to a significant GO term.
+
+After a quick observation it's apparent that about 3 functional groups of essential genes are linked together with positive links. These are :
+
+1. proteolysis, protein catabolic processes
+2. ATP synthesis, nucleotide synthesis
+3. Response to stress
+
+
+
+```{r}
+degree_bipartite_GO_Gene_essential_strong_g <- as.data.frame(igraph::degree(bipartite_GO_Gene_essential_strong_g)) %>% tibble::rownames_to_column(.,var = "ID")
+colnames(degree_bipartite_GO_Gene_essential_strong_g) <- c("ID", "Degree")
+
+bipartite_GO_Gene_essential_strong_attributes <- left_join(bipartite_GO_Gene_essential_strong_attributes, degree_bipartite_GO_Gene_essential_strong_g, by=c("ID"="ID"))
+
+bipartite_GO_Gene_essential_strong_attributes_all <- bipartite_GO_Gene_essential_strong_attributes %>% group_by(Degree) %>% summarise(count=n())
+bipartite_GO_Gene_essential_strong_attributes_group <- bipartite_GO_Gene_essential_strong_attributes %>% group_by(Degree, Type) %>% summarise(count=n())
+
+ggplot()+
+  #geom_point(data = bipartite_GO_Gene_essential_strong_attributes_all, aes(x = Degree, y = count,color="All" ))+
+  geom_point(data = bipartite_GO_Gene_essential_strong_attributes_group, aes(x = Degree, y = count ,color=Type))+
+  #ggtitle("Degree Distribution GO Terms and Genes network")+
+  scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x))) +
+  scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x),
+              labels = trans_format("log10", math_format(10^.x)))+
+  annotation_logticks(sides="trbl")+
+  coord_fixed(ratio = 1)+
+  labs(x="degree", y="frequency of degree")+
+  #scale_colour_manual(values = c("Complexes"="lightblue","Proteins"="yellow3"))+
+  theme_bw()
+
+ggsave("Bipartite_GO_Term_Genes_Degree_Distribution_.pdf", width = 7,height = 11,units = "cm",plot = last_plot(), device = "pdf", dpi = 150,path = "Figures/")
+```
+
+
+
+### Strongly connected component
+
+```{r, echo=FALSE}
+#### The data and the preparation necessary to load to topGO object.
+#universe_dros_net_entrez  # Gene Universe
+
+#strong_dros_net_entrez # genes of interest
+
+# then make a factor that is 1 if the probeset is "interesting" and 0 otherwise
+geneList_dros <- as.integer(universe_dros_net_entrez %in% strong_dros_net_entrez)
+# name the factor with the probeset names
+names(geneList_dros) <- universe_dros_net_entrez
+
+# xxx <- annFUN.org("BP", mapping = "org.Dm.eg.db", ID = "entrez")
+# head(xxx)
+
+# Make the topGO object with the data
+sampleGOdata <- new("topGOdata", description = "Simple session", ontology = "BP", allGenes = as.factor(geneList_dros), nodeSize = 5,annot = annFUN.org, mapping="org.Dm.eg.db", ID="entrez")
+
+# Run the tests
+resultFisher <- runTest(sampleGOdata, algorithm = "classic", statistic = "fisher")
+
+resultKS <- runTest(sampleGOdata, algorithm = "classic", statistic = "ks")
+resultKS.elim <- runTest(sampleGOdata, algorithm = "elim", statistic = "ks")
+
+# Analysis of results
+
+# Dataframe with top GO
+allRes <- GenTable(sampleGOdata, classicFisher = resultFisher, classicKS = resultKS, elimKS = resultKS.elim, orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 20)
+
+pValue.classic <- score(resultKS)
+pValue.elim <- score(resultKS.elim)[names(pValue.classic)]
+gstat <- termStat(sampleGOdata, names(pValue.classic))
+gSize <- gstat$Annotated / max(gstat$Annotated) * 4
+
+# function for building color map for plotting
+colMap <- function(x) {
+  .col <- rep(rev(heat.colors(length(unique(x)))), time = table(x))
+  return(.col[match(1:length(x), order(x))])}
+  
+gCol <- colMap(gstat$Significant)
+
+# Plot the p values of the different algorithms classic and elim
+plot(pValue.classic, pValue.elim, xlab = "p-value classic", ylab = "p-value elim", pch = 19, cex = gSize, col = gCol)
+sel.go <- names(pValue.classic)[pValue.elim < pValue.classic]
+
+cbind(termStat(sampleGOdata, sel.go),elim = pValue.elim[sel.go],classic = pValue.classic[sel.go])
+
+showSigOfNodes(sampleGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
+
+printGraph(sampleGOdata, resultKS.elim, firstSigNodes = 5, fn.prefix = "tGO", useInfo = "all")
+
+```
+
+
+### All network
+
+```{r, echo=FALSE}
+#### The data and the preparation necessary to load to topGO object.
+#universe_dros_net_entrez  # Gene Universe
+
+#all_drosophila_genes_DATABASE # genes of interest
+
+# then make a factor that is 1 if the probeset is "interesting" and 0 otherwise
+geneList_dros <- as.integer(all_drosophila_genes_DATABASE %in% universe_dros_net_entrez)
+# name the factor with the probeset names
+names(geneList_dros) <- all_drosophila_genes_DATABASE
+
+# xxx <- annFUN.org("BP", mapping = "org.Dm.eg.db", ID = "entrez")
+# head(xxx)
+
+# Make the topGO object with the data
+sampleGOdata <- new("topGOdata", description = "Simple session", ontology = "BP", allGenes = as.factor(geneList_dros), nodeSize = 5,annot = annFUN.org, mapping="org.Dm.eg.db", ID="entrez")
+
+# Run the tests
+resultFisher <- runTest(sampleGOdata, algorithm = "classic", statistic = "fisher")
+
+resultKS <- runTest(sampleGOdata, algorithm = "classic", statistic = "ks")
+resultKS.elim <- runTest(sampleGOdata, algorithm = "elim", statistic = "ks")
+
+# Analysis of results
+
+# Dataframe with top GO
+allRes <- GenTable(sampleGOdata,classicFisher = resultFisher, classicKS = resultKS, elimKS = resultKS.elim, orderBy = "elimKS", ranksOf = "classicFisher", topNodes = 20)
+
+goID <- allRes[1, "GO.ID"]
+#gt <- printGenes(sampleGOdata, whichTerms = goID, chip = affyLib, numChar = 40)
+
+pValue.classic <- score(resultKS)
+pValue.elim <- score(resultKS.elim)[names(pValue.classic)]
+gstat <- termStat(sampleGOdata, names(pValue.classic))
+gSize <- gstat$Annotated / max(gstat$Annotated) * 4
+
+# function for building color map for plotting
+colMap <- function(x) {
+  .col <- rep(rev(heat.colors(length(unique(x)))), time = table(x))
+  return(.col[match(1:length(x), order(x))])}
+  
+gCol <- colMap(gstat$Significant)
+
+# Plot the p values of the different algorithms classic and elim
+plot(pValue.classic, pValue.elim, xlab = "p-value classic", ylab = "p-value elim", pch = 19, cex = gSize, col = gCol)
+sel.go <- names(pValue.classic)[pValue.elim < pValue.classic]
+
+cbind(termStat(sampleGOdata, sel.go),elim = pValue.elim[sel.go],classic = pValue.classic[sel.go])
+
+showSigOfNodes(sampleGOdata, score(resultKS.elim), firstSigNodes = 5, useInfo = 'all')
+
+printGraph(sampleGOdata, resultKS.elim, firstSigNodes = 5, fn.prefix = "tGO", useInfo = "all")
+
+```
+
+This has to be done also for big strongly connected component, the essential genes cluster. 
+
+
+## Functional Analysis of essential cluster
+
+The essential protein cluster. 
+
+```{r}
+
+tripartite_net_GO_GENE_COMPLEX <- left_join(bipartite_GO_Gene_essential_strong_edgelist_full,Protein_Complex_bipartite, by=c("FLYBASE"="Protein")) %>% left_join(., dros_complexes, by=c("Complex"="V1"))
+
+tripartite_net_GO_GENE_COMPLEX <- tripartite_net_GO_GENE_COMPLEX %>% group_by(.,Complex, FLYBASE) %>% distinct() %>% group_by(., Complex) %>% mutate(., Complex_protein=n()) %>% group_by(Complex, Complex_protein) %>% distinct() %>% right_join(.,tripartite_net_GO_GENE_COMPLEX,by=c("Complex"="Complex"))
+
+tripartite_net_GO_GENE_COMPLEX <- tripartite_net_GO_GENE_COMPLEX %>% mutate(., Missing_Complex_proteins=V2-Complex_protein) %>% mutate(., Missing_Complex_fraction=(V2-Complex_protein)/V2) %>% ungroup()
+
+tripartite_net_GO_GENE_COMPLEX <- tripartite_net_GO_GENE_COMPLEX[,c(1,9,4,3,10,21,22,2,12,5,7,6,8,11,13,14,15,16,17,18,19,20)]
+
+colnames(tripartite_net_GO_GENE_COMPLEX)[5]<- "Total_Complex_Proteins"
+colnames(tripartite_net_GO_GENE_COMPLEX)[9] <- "Term_Complex"
+
+tripartite_net_GO_GENE_COMPLEX_literature <- tripartite_net_GO_GENE_COMPLEX %>% filter(., V3=="Literature") ## We lose 1 gene.
+setdiff(unique(tripartite_net_GO_GENE_COMPLEX$FLYBASE),unique(tripartite_net_GO_GENE_COMPLEX_literature$FLYBASE))
+
+write.table(x = tripartite_net_GO_GENE_COMPLEX_literature, file = "../Thesis_Essentiality_Drosophila_Signed_Network/Tables/tripartite_net_GO_GENE_COMPLEX_literature.csv", sep = ",", col.names = TRUE,row.names = FALSE)
+```
+
+The gene `r setdiff(unique(tripartite_net_GO_GENE_COMPLEX$FLYBASE),unique(tripartite_net_GO_GENE_COMPLEX_literature$FLYBASE))` is included in 2 protein complexes which are predicted by NetworkBlast. This is the reason that we lose that gene when we filter the list for the literature complexes only. 
+
+
+```{r}
+bipartite_GO_Gene_essential_strong_g_giant <- as_bipartite(bipartite_GO_Gene_essential_strong_g_giant)
+
+```
+
+
+```{r, echo=FALSE}
+rm(list = setdiff(ls(), c("gcomp_attributes","dros_essential", "dros_network_genes", "dros_net","drosophila_degreesA", "Protein_Complex_bipartite", "complex_essentiality_wide_source", "d_bootstrap_boxplot_merged","dros_complexes","tripartite_net_GO_GENE_COMPLEX")))
+
+```
+
+# References

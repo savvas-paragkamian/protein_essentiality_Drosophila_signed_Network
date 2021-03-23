@@ -1,0 +1,123 @@
+---
+bibliography: Networks Centralities and Negative Weigths.bib
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+header-includes:
+- \usepackage{placeins}
+- \usepackage{fancyhdr}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{graphicx}
+- \usepackage{microtype}
+- \onehalfspacing
+- \counterwithin{figure}{section}
+- \counterwithin{table}{section}
+- \usepackage[utf8]{inputenc}
+- \usepackage[greek,english]{babel}
+- \renewcommand{\familydefault}{\sfdefault}
+- \usepackage{helvet}
+- \usepackage{mathtools}
+- \usepackage{amsmath}
+- \usepackage{sansmathfonts}
+- \newtheorem{theorem}{Theorem}
+- \newtheorem{mydef}{Definition}
+- \usepackage{multirow}
+- \usepackage{subcaption}
+---
+
+\appendix
+\section{Appendix: COMPLEAT database \label{append_compleat}}
+
+The COMPLEAT database [@Vinayagam2013a] provides both protein complex data and a platform for annotation and enrichment of RNAi and other data. To our knowledge it's the most complete database for protein complexes of \textit{D.melanogaster}, \textit{S.cerevisiae} and \textit{H.sapiens} yet. While analyzing the complex data we discovered an irregularity in the complex size distribution. The authors didn't mention this irregularity which is apparent in Figure \ref{complex_dist_compleat}.There is a gap in the distribution between 15 and 16 number of proteins of complexes size for all organisms (Figure \ref{complex_dist_compleat}). This gap disappears in the reverse distribution which is the only distribution that was published by the authors, i.e the number of complexes that each protein participates in (Figure \ref{protein_dist_compleat}). This pattern looks like a phase transition which if it was true then it would have huge biological meaning. But with a more thorough look we discovered the source of this irregularity (Figures \ref{complex_dist_meth_yeast_compleat} and \ref{complex_dist_compleat_methods}). 
+
+\begin{table}[ht]
+\centering
+\caption{Summary of COMPLEAT database for \textit{D.melanogaster} }
+\label{summary_compleat}
+\begin{tabular}{ p{3cm} p{3cm} p{3cm} }
+\hline \\ [-1.5ex]
+Source    & Complexes & Proteins  \\ [1ex]
+\hline \\ [-1.5ex]
+Literature (326 distinct experiments) & 2045  & 4501\\
+NetworkBlast    & 2893 & 3525 \\
+CFinder  & 389   & 1362  \\
+Total  & 5327   & 5786 \\
+\hline
+\end{tabular}
+\end{table}
+
+The complexes are provided by 3 different approaches, literature from specific experiments both small scale and high-throughput and computationally inferred from CFinder and NetworkBlast algorithms [@Kalaev2008]. In table \ref{summary_compleat} we see that half of the complexes are provided from the NetworkBlast algorithm. This tool has a plateau of 16 proteins as maximum complex size (Figure \ref{Cum_complex_dist_dros_compleat}) although the other methods show a heavy-tailed distribution to complexes size. This creates a bias towards medium sized complexes that is reflected to other analysis like the modular essentiality discussed here (Figure \ref{complex_log_ratio_essentiality}). Further investigation is needed to determine if this bias of NetworkBlast is due to authors' implementation of NetworkBlast or the algorithm has an inherent bias towards medium sized protein complexes.
+
+\begin{figure}[hb]
+    \centering
+    \includegraphics[width=0.7\textwidth]{../Figures/DistributionCumulative_Methods_All_Proteins_in_Complexes_Drosoplila_Compleat.pdf}
+    \caption{Complex size cumulative distribution of \textit{D.melanogaster} based on inference methods of COMPLEAT database. NetworkBlast reaches $100\%$ in complex size of 16 proteins.}
+    \label{Cum_complex_dist_dros_compleat}
+\end{figure}
+
+\begin{figure}[!h]
+    \centering
+    \begin{subfigure}[hb]{0.4\textwidth}
+        \includegraphics[width=\textwidth]{../Figures/Distribution_Proteins_in_Complexes_All_Compleat.pdf}
+        \caption{Complexes size distribution.}
+        \label{complex_dist_compleat}
+    \end{subfigure}
+    \begin{subfigure}[hb]{0.5\textwidth}
+        \includegraphics[width=\textwidth]{../Figures/Distribution_Complexes_in_Proteins_ALL_Compleat.pdf}
+        \caption{Proteins participation in complexes distribution.}
+        \label{protein_dist_compleat}
+    \end{subfigure}
+    \begin{subfigure}[hb]{0.45\textwidth}
+        \includegraphics[width=\textwidth]{../Figures/Distribution_Methods_All_Proteins_in_Complexes_Drosoplila_Compleat.pdf}
+        \caption{\textit{D.melanogaster} complexes size distribution with different methods.}
+        \label{complex_dist_compleat_methods}
+    \end{subfigure}
+    \begin{subfigure}[hb]{0.45\textwidth}
+        \includegraphics[width=\textwidth]{../Figures/Distribution_Methods_All_Proteins_in_Complexes_Yeast_Compleat.pdf}
+        \caption{\textit{S.cerevisiae} complexes size distribution with different methods.}
+        \label{complex_dist_meth_yeast_compleat}
+    \end{subfigure}
+    \caption{COMPLEAT database distributions.}\label{dist_compleat}
+\end{figure}
+
+
+
+\newpage
+
+\section{Appendix: Network contraction with complexes \label{net_contraction}}
+
+\subsection{Complexes in the signed network}
+
+Which of these protein complexes are present in our data set? To answer this question we annotated the signed network proteins with complexes data. Most complexes have missing proteins in the interval $[0.10]$ (Figure \ref{missing_proteins}) which is expected since most complexes are small (Figure \ref{complex_dist_compleat}). We found that 585 complexes were complete (Figure \ref{complex_proteins_complete}). 
+
+![Histogram of the missing proteins of complexes when comparered to the signed network.\label{missing_proteins}](../Figures/Histogram_Complex_Missing_Proteins_in_network.pdf){ width=70% }
+
+
+![Histogram of the percentage of proteins that appear in the signed PPI network per complex.\label{complex_proteins_complete}](../Figures/Histogram_Complex_Completeness_in_network.pdf){ width=70% }
+
+
+\subsection{Network contraction with complexes}
+
+Since the complexes are molecules that facilitate the processes of the organisms and not the individual proteins it is very important to construct networks with complexes interactions. This requires experimental procedures and computational tools that can change the resolution to complexes scale. Scalability is one of the main goals for network science in the following years. To contract network with complexes from the protein - protein interaction network it is necessary to determine which complexes to use. The rule we applied in this instance is to use only the complexes that all of their proteins are present in the network. This resulted in 585 complexes. Others can use a different threshold, like to use complexes that have >80% of their proteins present. Or take a completely different approach, like using GO annotation in the original network for the selection of complexes or applying clustering methods in protein networks like linked communities [@Ahn2010; @Kalinka2011]. 
+
+These 585 complexes contain 1063 proteins which have 2123 interactions in the signed network. between these. So the 1/3 of the signed network is used. After we created the complexes network, two complexes are interacting if their proteins interact in the signed network. We got a network that contained duplicated edges and self loops which we deleted. There were multiple edges between complexes, we kept those that were distinct in the signed network.
+
+![Histogram of the essentiality fraction of the complexes that have all of their proteins in the signed PPI network. Forty nine protein complexes, from the 585 complexes that are complete in the signed network of drosophila, consist of 50% or more essential proteins.\label{complete_complex_essentiality}](../Figures/Essentiality_Fraction_Histogram_Complexes_in_Network.pdf){ width=70% }
+
+In order to keep as much information as possible so treated positive and negative edges independently. More specifically, from all the redundant edges with the same direction, we kept 2, one positive and one negative. The weight of the positive edge and negative edge will be the normalized weight from all the positive and negative edges, respectively. Finally we normalized all the weights with the absolute value of the maximum weight, in order to have all the edge weights in the [-1,1]. This methods resulted in a very dense network (table \ref{complex_edgelist_table}). 
+
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE}
+
+library(readr)
+library(knitr)
+
+complex_edgelist_table <- read_csv(file = "/Users/savasp/Google Drive/Complex Systems Master AUTH/Master Thesis Negative Weights Centralities/Thesis_Essentiality_Drosophila_Signed_Network/Tables/complex_edgelist_table.csv", col_names = T)
+complex_edgelist_table <- complex_edgelist_table[,c(1,4)]
+caption_complex_edgelist_table <- "This is a summary of the network between complexes based on the signed PPI network. Unique edges are those between complexes that \\label{complex_edgelist_table}"
+kable(complex_edgelist_table,caption=caption_complex_edgelist_table, align = 'c')
+```
+
+

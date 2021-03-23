@@ -1,0 +1,370 @@
+---
+title: "Yeast Genetic Interactions Network"
+fontsize: 12pt
+geometry: margin=1in
+output:
+  pdf_document:
+    fig_caption: yes
+    highlight: tango
+    keep_tex: yes
+    latex_engine: xelatex
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+  html_notebook: default
+  html_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+documentclass: article
+---
+
+# Genetic Interactions
+
+A genetic interaction (GI) between two genes generally indicates that the phenotype of a double mutant differs from what is expected from each individual mutant. The existence of a GI between two genes does not necessarily imply that these two genes code for interacting proteins or that the two genes are even expressed in the same cell. In fact, a GI only implies that the two genes share a functional relationship. These two genes may be involved in the same biological process or pathway; or they may also be involved in compensatory pathways with unrelated apparent function [Genetic interaction networks: better understand to better predict]
+
+
+
+# Data
+Here we will explore and analyse the GI network of yeast. Data were downloaded from [BIOGRID](https://thebiogrid.org/download.php) in December 2016 and were sorted by organism under the hyperlink: **BIOGRID-ORGANISM-3.4.143.tab2.zip**. We will use data from *Saccharomyces cerevisiae*. Files are in Tab2 format, so in order to import them in r, we first have to remove manually the text from the first part of the file. 
+
+```{r, echo=FALSE,warning=FALSE,message=FALSE}
+library(readxl)
+library(ggplot2)
+library(reshape2)
+library(dplyr)
+library(knitr)
+
+#### load the file
+yeast_BIOGRID <- read.delim("modified_BIOGRID-ORGANISM-Saccharomyces_cerevisiae_S288c-3.4.142.tab.txt",header = T,sep = "\t")
+
+
+```
+
+The file from yeast contains many interactions. From them we have to retrieve the ones we are interested in, which are the ones resulting from [Synthetic Genetic Arrays](https://en.wikipedia.org/wiki/Synthetic_genetic_array). 
+
+```{r}
+summary(yeast_BIOGRID$EXPERIMENTAL_SYSTEM)
+```
+
+These are
+
+* Negative: **Synthetic Lethality** and **Negative Genetic**
+* Positive: **Synthetic Rescue** and **Positive Genetic**
+
+## Extract GIN
+These four types of genetic relations are defined based on their differentietion from un expected phenotype. The expected phenotype is 
+
+
+**Synthetic Lethality** means that the second mutation is lethal.
+**Negative Genetic** means that the phenotype of the two mutations is worse than expected.
+**Synthetic Rescue** means that even though the first mutation is leathal, the second mutation regains the viability of the organism.
+**Positive Genetic** means that the phenotype is better (highest fitness) than expected.  
+```{r}
+
+yeast_GIN <- subset(x = yeast_BIOGRID, EXPERIMENTAL_SYSTEM=="Synthetic Lethality" | EXPERIMENTAL_SYSTEM=="Negative Genetic" | EXPERIMENTAL_SYSTEM=="Synthetic Rescue" | EXPERIMENTAL_SYSTEM=="Positive Genetic")
+yeast_GIN$weights <- with(yeast_GIN, ifelse(EXPERIMENTAL_SYSTEM=="Synthetic Lethality" | EXPERIMENTAL_SYSTEM=="Negative Genetic", -1, 1))
+
+rm(yeast_BIOGRID)
+
+summary(yeast_GIN$EXPERIMENTAL_SYSTEM)
+```
+
+The bar plot of the 4 types of relations. 
+```{r}
+ggplot()+
+  geom_bar(data = yeast_GIN, aes(EXPERIMENTAL_SYSTEM, y= ..count.., fill=EXPERIMENTAL_SYSTEM),show.legend = F)+
+  ggtitle("Different Genetic Interactions in Yeast")+
+  labs(x="EXPERIMENTAL SYSTEM", y= "Number of genetic links")+
+  theme(panel.grid.major = element_line(colour = "grey90"), panel.background = element_rect(fill = "white", colour = "grey60"),
+        axis.text.x = element_text(size  = 10, angle = 45,hjust = 1,vjust = 1))
+
+```
+
+
+## Duplicates and sign consistency
+
+We check for the unique links.In order to check this we first concatenate the node IDs for each link and then we check for uniqueness.
+```{r}
+yeast_GIN$links <- with(yeast_GIN,paste(yeast_GIN$INTERACTOR_A,yeast_GIN$INTERACTOR_B,sep = ",")) # concarnate in order to find duplicated links
+length(unique(yeast_GIN$links)) # how many unique links
+```
+
+But the number of links is:
+```{r}
+nrow(yeast_GIN)
+```
+
+So there are `r nrow(yeast_GIN)-length(unique(yeast_GIN$links))` duplicates. Next we want to label each link to see if it's duplicated and after that we count the duplicates of each link in order to find the origin of the duplicates.
+
+```{r}
+yeast_GIN$duplicate <- duplicated(yeast_GIN$links) | duplicated(yeast_GIN$links, fromLast = TRUE) # returns TRUE for all duplicates, not the first ones only
+
+yeast_GIN_dublicates <- subset(x = yeast_GIN, yeast_GIN$duplicate==TRUE)
+# count the number of occurences of each link
+GIN_occurences <- yeast_GIN %>%
+  group_by(links) %>%
+  summarise (n = n())
+
+#summary(GIN_occurences)
+```
+
+
+```{r}
+
+GIN_occurences$link <- c(seq(1:length(GIN_occurences$links)))
+GIN_dupl_freq<-aggregate(rep.int(1, length(GIN_occurences$link))~GIN_occurences$n, FUN=sum)
+names(GIN_dupl_freq)<-c("Copies per link","Count of links")
+kable(GIN_dupl_freq, align = 'c', caption = "The number of copies of each link in the data yeast GIN")
+
+```
+
+So some links appear multiple times. The link between YCR066W and YJL092W appears 16 times in the dataset. This is due to the different sources which discoved an already known genetic relation. Next we have to delete duplicates. In order to do so we have to examine the nature of the genetic interaction for each duplicate. If between duplicates there are contradictions of the sign of the genetic interaction we have to delete the interaction. If not, we'll keep one version of the interaction.
+
+```{r, cache=TRUE}
+## duplicated links
+
+#sort links so the duplicates are adjacent? 
+duplicated_interactions <- yeast_GIN_dublicates[order(yeast_GIN_dublicates$links),]
+#yeast_GIN2 <- head(duplicated_interactions,n = 200)
+yeast_GIN_unique_dup <- as.data.frame(matrix())
+yeast_GIN_unique_dup <- as.data.frame(unique(duplicated_interactions$links))
+yeast_GIN_unique_dup2 <- as.data.frame(yeast_GIN_unique_dup)
+
+ptm <- proc.time()
+for(i in 1:nrow(yeast_GIN_unique_dup)){
+
+  tmp_dupl_links <- subset(yeast_GIN_dublicates,yeast_GIN_dublicates$links==yeast_GIN_unique_dup[i,])
+  
+  if (abs(sum(tmp_dupl_links$weights))==nrow(tmp_dupl_links)){
+    
+    yeast_GIN_unique_dup2[i,2] <- "consistent"
+    #print(paste0("consistent ",yeast_GIN_unique_dup[i,1]))
+      
+    } else {
+      yeast_GIN_unique_dup2[i,2] <- "inconsistent"
+      #print(paste("inconsistent ",yeast_GIN_unique_dup[i,1]))
+    }
+ 
+  yeast_GIN_unique_dup2[i,3] <- length(which(tmp_dupl_links$weights>0))#Positive_Interactions
+  yeast_GIN_unique_dup2[i,4] <- length(which(tmp_dupl_links$weights<0)) #Positive_Interactions
+  tmp_dupl_links <- c()
+  
+}
+
+colnames(yeast_GIN_unique_dup2) <- c("Dublicated_Interactions","Consistency","Positive_Interactions", "Negative_Interactions")
+proc.time() - ptm
+
+```
+
+```{r}
+#consistency
+ggplot()+
+  geom_bar(data = yeast_GIN_unique_dup2, aes(Consistency, y= ..count.., fill=Consistency),show.legend = F)+
+  ggtitle("Sign Consistency across duplicate genetic yeast interactions from BIOGRID")+
+  labs(x="Consistency", y= "Number of duplicate genetic links")+
+  theme(panel.grid.major = element_line(colour = "grey90"), panel.background = element_rect(fill = "white", colour = "grey60"))
+
+count_consistency_GIN <- yeast_GIN_unique_dup2 %>%
+  group_by(Consistency) %>%
+  summarise (n = n())
+
+
+kable(count_consistency_GIN, align = 'c', caption = "Sign consistency across duplicated genetic interactions in yeast GIN")
+
+```
+
+Next we have to keep only the unique interactions and remove the inconsistent interactions from the original dataset.
+
+```{r}
+ddd <- subset(yeast_GIN_unique_dup2,yeast_GIN_unique_dup2$Consistency=="inconsistent")
+
+yeast_GIN$Consistency <- !(yeast_GIN$links %in% ddd$Dublicated_Interactions)
+yeast_GIN$duplicate_not_first <- duplicated(yeast_GIN$links)
+yeast_GIN_final <- subset(yeast_GIN, yeast_GIN$duplicate_not_first==FALSE)
+yeast_GIN_final <- subset(yeast_GIN_final, yeast_GIN_final$Consistency==TRUE)
+
+
+nrow(yeast_GIN_final)==length(unique(yeast_GIN_final$links)) # check unique links
+
+nrow(yeast_GIN_final)
+
+a <- as.character(yeast_GIN_final$INTERACTOR_A)
+b <- as.character(yeast_GIN_final$INTERACTOR_B)
+yeast_GIN_genes <- as.data.frame(unique(c(a,b)))
+yeast_GIN_genes <- yeast_GIN_final$INTERACTOR_B #as.factor(yeast_GIN_final$INTERACTOR_B))
+
+nrow(yeast_GIN_genes)
+
+```
+The removal of duplicates and the complete deletion of links with duplicates and inconsistent signs leads to the final edgelist. The final edgelist of yeast GIN consists of **143448** interactions and **5433** genes.
+
+```{r}
+count_weights_GIN <- yeast_GIN_final %>%
+  group_by(weights) %>%
+  summarise (n = n())
+
+
+kable(count_weights_GIN, align = 'c', caption = "Weight frequences of the yeast GIN")
+```
+
+## Loops
+
+Next, we need to examine if there are any loops in the network. Which means that we have to look for interactions that have the same gene in edge list.
+```{r}
+
+loop_finder <- function(x){
+  d<- c()
+  for(i in 1:nrow(x)){
+   
+    if(as.character(x[i,1])==as.character(x[i,2])){
+      d <- c(d,as.character(x[i,1]))
+    }else{}
+  }
+    d <-as.data.frame(d)
+    colnames(d)[1]<-"genes_loop"  
+    d
+  }
+loops <- loop_finder(yeast_GIN_final) 
+nrow(loops)
+```
+There are 8 loops in the yeast GIN. What do they mean? Do they have biological meaning?
+
+
+# Network analysis
+
+Import the network in igraph. We choose to delete the loops (8). 
+```{r,warning=FALSE,message=FALSE}
+library(igraph)
+
+yeast_GIN_Net <- as.data.frame(yeast_GIN_final[,-c(3:11,13:16)])
+g_yeast_GIN <- graph_from_data_frame(yeast_GIN_Net,directed = T)
+summary(g_yeast_GIN)
+is.simple(g_yeast_GIN)
+
+#It has multiple links? 
+E(g_yeast_GIN)$multiple <- which_multiple(g_yeast_GIN)
+summary(E(g_yeast_GIN)$multiple) # all FALSE
+
+# It has loops?   
+E(g_yeast_GIN)$loop <- which_loop(g_yeast_GIN)
+summary(E(g_yeast_GIN)$loop) # 8 TRUE loops
+
+#Remove loops
+g_yeast_GIN <- igraph::simplify(g_yeast_GIN)
+# Assign attributes
+yeast_GIN_Net$sign_color <- with(yeast_GIN_Net, ifelse(weights<0, paste0("red"), paste0("blue")))
+E(g_yeast_GIN)$weights <- yeast_GIN_Net$weights
+E(g_yeast_GIN)$sign_color <- yeast_GIN_Net$sign_color
+is.simple(g_yeast_GIN)
+summary(g_yeast_GIN)
+```
+
+Create the adjacency matrix.
+```{r}
+adjacency_weight_yeast_GIN <- as_adjacency_matrix(g_yeast_GIN, attr = "weights",names = T)
+adjacency_weight_yeast_GIN <- as.data.frame(as.matrix(adjacency_weight_yeast_GIN))
+sum(sapply(adjacency_weight_yeast_GIN,is.character)) # if 0 then there are no characters inside dataframe!
+
+#write.table(adjacency_weight_yeast_GIN,file = "adjacency_matrix_yeast_GIN.txt",sep = "\t",row.names = T,col.names = T) # the file of the adjacency matrix.
+
+```
+
+To make further calculations we isolate the giant component.
+
+```{r}
+igraph::is.connected(g_yeast_GIN)
+decg<-decompose.graph(g_yeast_GIN, min.vertices = 10) #upografima tis megalis sinistosas 
+gcomp_GIN<-decg[[1]]
+igraph::is.connected(gcomp_GIN)
+summary(gcomp_GIN)
+```
+
+Only 11 genes and 9 links weren't connected with the giant component.
+
+## Degree distribution
+
+One of the first things to examine is the degree distribution of the graph.
+
+```{r}
+# Degree distribution of the graph
+
+de <- igraph::degree(gcomp_GIN)
+de <- as.data.frame(de)
+de$node <- c(seq(1:length(de$de)))
+dd<-aggregate(rep.int(1, length(de$node))~de$de, FUN=sum)
+names(dd)<-c("val","freq")
+
+ggplot()+
+  geom_point(data = dd, aes(x = val,y = freq ),color="red")+
+  scale_y_log10()+
+  scale_x_log10()+
+  ggtitle("Degree Distribution of Yeast Genetic Interactions Network")+
+  labs(x="Log10(node degree)", y="log10(frequency of degree)")+
+  theme_bw()
+```
+
+Plot of the network.
+
+```{r}
+layg <- layout_nicely(gcomp_GIN)
+V(gcomp_GIN)$coord1 <-layg[ ,1]     ## network plots
+V(gcomp_GIN)$coord2 <-layg[ ,2]
+
+plot(gcomp_GIN, 
+     layout=layg,
+     vertex.shape="circle", 
+     vertex.size=0.0095, 
+     vertex.color="green",  
+     vertex.frame.color="green",
+     vertex.label=NA, 
+     #vertex.label.cex = vcount(g)*0.00004,
+     #vertex.label.color ="black", 
+     edge.color=E(gcomp_GIN)$sign_color,
+     edge.width=0.03, 
+     edge.arrow.size = 0.00001,
+     edge.arrow.width = 0.0000005,
+     #edge.label=round(x = E(g)$weight,digits = 3), 
+     #edge.label.cex = 0.3,
+     #edge.label.color = E(g)$color,
+     margin = 0,
+     main = "",
+     sub = "")
+title(main = paste("yeast GIN network "), cex.main= 1.5, cex.sub = 1.2,outer = F)
+
+
+```
+
+
+```{r}
+#sss <- induced_subgraph(gcomp_GIN, v = nei[[1]])
+
+#plot(sss,edge.color=E(gcomp_GIN)$sign_color)
+
+#nei <- neighborhood(gcomp_GIN,order = 1,nodes = "YOL001W")
+
+yeast_GIN_final$AD <- paste0(yeast_GIN_final[,1],",",yeast_GIN_final[,12])
+yeast_GIN_final$BD <- paste0(yeast_GIN_final[,2],",",yeast_GIN_final[,12])
+
+AD_freq <- table(yeast_GIN_final$AD)
+AD_freq <- as.data.frame(AD_freq)
+BD_freq <- table(yeast_GIN_final$BD)
+
+
+AD_freq_a <- strsplit(as.character(AD_freq$Var1),split = ",")
+AD_freq_a <- as.data.frame(AD_freq_a)
+AD_freq_a <- t(AD_freq_a)
+
+AD_freq$gene <- AD_freq_a[,1]
+AD_freq$weight <- AD_freq_a[,2]
+
+AD_freq_a_1 <- AD_freq[order(AD_freq$weight,AD_freq$Freq,decreasing = T),]
+AD_freq_a_neg <- subset(x = AD_freq_a_1,AD_freq_a_1$weight==-1)
+#AD_freq_a_1 <- AD_freq[order(AD_freq$Freq,decreasing = T),]
+
+
+
+
+
+```
+

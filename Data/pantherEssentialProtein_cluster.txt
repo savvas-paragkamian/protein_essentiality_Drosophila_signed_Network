@@ -1,0 +1,36 @@
+DROME|FlyBase=FBgn0250746|UniProtKB=Q9VNA5	FBgn0250746	Proteasome subunit beta type-4;Prosbeta7;ortholog	PROTEASOME SUBUNIT BETA TYPE-4 (PTHR11599:SF72)		Drosophila melanogaster
+DROME|FlyBase=FBgn0028688|UniProtKB=Q9V3G7	FBgn0028688	26S proteasome non-ATPase regulatory subunit 6;Rpn7;ortholog	26S PROTEASOME NON-ATPASE REGULATORY SUBUNIT 6 (PTHR14145:SF6)		Drosophila melanogaster
+DROME|FlyBase=FBgn0011766|UniProtKB=Q27368	FBgn0011766	Transcription factor E2f;E2f;ortholog	TRANSCRIPTION FACTOR E2F (PTHR12081:SF67)	nucleic acid binding(PC00171);transcription factor(PC00218)	Drosophila melanogaster
+DROME|FlyBase=FBgn0086134|UniProtKB=P40301	FBgn0086134	Proteasome subunit alpha type-2;Prosalpha2;ortholog	PROTEASOME SUBUNIT ALPHA TYPE-2 (PTHR11599:SF89)		Drosophila melanogaster
+DROME|FlyBase=FBgn0031549|UniProtKB=Q9VQS4	FBgn0031549	Spindly;Spindly;ortholog			Drosophila melanogaster
+DROME|FlyBase=FBgn0016697|UniProtKB=Q95083	FBgn0016697	Proteasome subunit alpha type-5;Prosalpha5;ortholog	PROTEASOME SUBUNIT ALPHA TYPE-5 (PTHR11599:SF88)		Drosophila melanogaster
+DROME|FlyBase=FBgn0026380|UniProtKB=Q9XYN7	FBgn0026380	Proteasome subunit beta type-3;Prosbeta3;ortholog	PROTEASOME SUBUNIT BETA TYPE-3 (PTHR11599:SF70)		Drosophila melanogaster
+DROME|FlyBase=FBgn0028687|UniProtKB=Q7KMQ0	FBgn0028687	26S proteasome regulatory complex subunit p48B;Rpt1;ortholog	26S PROTEASE REGULATORY SUBUNIT 7 (PTHR23073:SF46)	hydrolase(PC00121)	Drosophila melanogaster
+DROME|FlyBase=FBgn0032596|UniProtKB=Q9VJJ0	FBgn0032596	Proteasome subunit beta type;Prosbeta4;ortholog	PROTEASOME SUBUNIT BETA TYPE-2 (PTHR11599:SF95)		Drosophila melanogaster
+DROME|FlyBase=FBgn0015283|UniProtKB=P55035	FBgn0015283	26S proteasome non-ATPase regulatory subunit 4;Rpn10;ortholog	26S PROTEASOME NON-ATPASE REGULATORY SUBUNIT 4 (PTHR10223:SF3)	enzyme modulator(PC00095)	Drosophila melanogaster
+DROME|FlyBase=FBgn0023174|UniProtKB=Q9VUJ1	FBgn0023174	Proteasome subunit beta type;Prosbeta2;ortholog	AT05866P-RELATED (PTHR11599:SF71)		Drosophila melanogaster
+DROME|FlyBase=FBgn0010265|UniProtKB=Q03334	FBgn0010265	40S ribosomal protein S13;RpS13;ortholog	40S RIBOSOMAL PROTEIN S13 (PTHR11885:SF11)	ribosomal protein(PC00171)	Drosophila melanogaster
+DROME|FlyBase=FBgn0002284|UniProtKB=P40304	FBgn0002284	Proteasome subunit beta type-1;Prosbeta6;ortholog	PROTEASOME SUBUNIT BETA TYPE-1 (PTHR11599:SF96)		Drosophila melanogaster
+DROME|FlyBase=FBgn0015282|UniProtKB=P48601	FBgn0015282	26S protease regulatory subunit 4;Rpt2;ortholog	26S PROTEASE REGULATORY SUBUNIT 4 (PTHR23073:SF40)	hydrolase(PC00121)	Drosophila melanogaster
+DROME|FlyBase=FBgn0002787|UniProtKB=P26270	FBgn0002787	26S proteasome non-ATPase regulatory subunit 7;Rpn8;ortholog	26S PROTEASOME NON-ATPASE REGULATORY SUBUNIT 7 (PTHR10540:SF13)		Drosophila melanogaster
+DROME|FlyBase=FBgn0010382|UniProtKB=P54733	FBgn0010382	G1/S-specific cyclin-E;CycE;ortholog	G1/S-SPECIFIC CYCLIN-E (PTHR10177:SF333)	kinase activator(PC00095)	Drosophila melanogaster
+DROME|FlyBase=FBgn0028686|UniProtKB=Q9V405	FBgn0028686	26S proteasome regulatory complex subunit p48A;Rpt3;ortholog	26S PROTEASE REGULATORY SUBUNIT 6B (PTHR23073:SF50)	hydrolase(PC00121)	Drosophila melanogaster
+DROME|FlyBase=FBgn0011211|UniProtKB=P35381	FBgn0011211	ATP synthase subunit alpha, mitochondrial;blw;ortholog	ATP SYNTHASE SUBUNIT ALPHA, MITOCHONDRIAL (PTHR43089:SF1)	ATP synthase(PC00227);DNA binding protein(PC00068);anion channel(PC00002);ligand-gated ion channel(PC00171)	Drosophila melanogaster
+DROME|FlyBase=FBgn0250843|UniProtKB=P12881	FBgn0250843	Proteasome subunit alpha type-1;Prosalpha6;ortholog	PROTEASOME SUBUNIT ALPHA TYPE-RELATED (PTHR11599:SF93)		Drosophila melanogaster
+DROME|FlyBase=FBgn0028693|UniProtKB=Q9V436	FBgn0028693	26S proteasome regulatory complex subunit p30;Rpn12;ortholog	26S PROTEASOME NON-ATPASE REGULATORY SUBUNIT 8 (PTHR12387:SF1)	enzyme modulator(PC00095)	Drosophila melanogaster
+DROME|FlyBase=FBgn0028684|UniProtKB=Q9V3V6	FBgn0028684	26S proteasome regulatory complex subunit p50;Rpt5;ortholog	26S PROTEASE REGULATORY SUBUNIT 6A (PTHR23073:SF39)	hydrolase(PC00121)	Drosophila melanogaster
+DROME|FlyBase=FBgn0261396|UniProtKB=P25161	FBgn0261396	Probable 26S proteasome non-ATPase regulatory subunit 3;Rpn3;ortholog	26S PROTEASOME NON-ATPASE REGULATORY SUBUNIT 3 (PTHR10758:SF6)	enzyme modulator(PC00095)	Drosophila melanogaster
+DROME|FlyBase=FBgn0039713|UniProtKB=Q8MLY8	FBgn0039713	40S ribosomal protein S8;RpS8;ortholog	40S RIBOSOMAL PROTEIN S8 (PTHR10394:SF7)		Drosophila melanogaster
+DROME|FlyBase=FBgn0029134|UniProtKB=Q7K148	FBgn0029134	Proteasome subunit beta type;Prosbeta5;ortholog	PROTEASOME SUBUNIT BETA TYPE (PTHR11599:SF90)		Drosophila melanogaster
+DROME|FlyBase=FBgn0028692|UniProtKB=Q9V3P6	FBgn0028692	26S proteasome non-ATPase regulatory subunit 1;Rpn2;ortholog	26S PROTEASOME NON-ATPASE REGULATORY SUBUNIT 1 (PTHR10943:SF5)	enzyme modulator(PC00095)	Drosophila melanogaster
+DROME|FlyBase=FBgn0010217|UniProtKB=Q05825	FBgn0010217	ATP synthase subunit beta, mitochondrial;ATPsyn-beta;ortholog	ATP SYNTHASE SUBUNIT BETA, MITOCHONDRIAL (PTHR15184:SF59)	ATP synthase(PC00227);DNA binding protein(PC00068);anion channel(PC00002);ligand-gated ion channel(PC00171)	Drosophila melanogaster
+DROME|FlyBase=FBgn0020235|UniProtKB=O01666	FBgn0020235	ATP synthase subunit gamma, mitochondrial;ATPsyn-gamma;ortholog	ATP SYNTHASE SUBUNIT GAMMA, MITOCHONDRIAL (PTHR11693:SF24)		Drosophila melanogaster
+DROME|FlyBase=FBgn0028695|UniProtKB=Q9VW54	FBgn0028695	26S proteasome regulatory complex subunit p97;Rpn1;ortholog	26S PROTEASOME NON-ATPASE REGULATORY SUBUNIT 2 (PTHR10943:SF7)	enzyme modulator(PC00095)	Drosophila melanogaster
+DROME|FlyBase=FBgn0032884|UniProtKB=Q9VIJ5	FBgn0032884	LD03247p;Pomp;ortholog	PROTEASOME MATURATION PROTEIN (PTHR12828:SF4)		Drosophila melanogaster
+DROME|FlyBase=FBgn0028685|UniProtKB=Q9W414	FBgn0028685	Regulatory particle triple-A ATPase 4;Rpt4;ortholog	26S PROTEASE REGULATORY SUBUNIT 10B (PTHR23073:SF49)	hydrolase(PC00121)	Drosophila melanogaster
+DROME|FlyBase=FBgn0003941|UniProtKB=P18101	FBgn0003941	Ubiquitin-60S ribosomal protein L40;RpL40;ortholog	POLYUBIQUITIN-B (PTHR10666:SF214)	ribosomal protein(PC00171)	Drosophila melanogaster
+DROME|FlyBase=FBgn0028694|UniProtKB=Q9V3H2	FBgn0028694	26S proteasome non-ATPase regulatory subunit 14;Rpn11;ortholog	26S PROTEASOME NON-ATPASE REGULATORY SUBUNIT 14 (PTHR10410:SF8)	transcription factor(PC00218)	Drosophila melanogaster
+DROME|FlyBase=FBgn0004107|UniProtKB=P23573	FBgn0004107	Cell division control protein 2 cognate;cdc2c;ortholog	CELL DIVISION CONTROL PROTEIN 2 COGNATE (PTHR24056:SF301)	non-receptor serine/threonine protein kinase(PC00220);non-receptor tyrosine protein kinase(PC00137)	Drosophila melanogaster
+DROME|FlyBase=FBgn0050497|UniProtKB=A1Z743	FBgn0050497	CG30497, isoform A;CG30497;ortholog	PQN-44, ISOFORM A (PTHR12974:SF49)		Drosophila melanogaster
+DROME|FlyBase=FBgn0000289|UniProtKB=A8DYD1	FBgn0000289	Combgap, isoform L;cg;ortholog			Drosophila melanogaster
+DROME|FlyBase=FBgn0010590|UniProtKB=A0AQH0	FBgn0010590	Proteasome subunit beta type;Prosbeta1;ortholog	PROTEASOME SUBUNIT BETA TYPE (PTHR11599:SF82)		Drosophila melanogaster

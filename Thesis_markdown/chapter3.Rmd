@@ -1,0 +1,390 @@
+---
+bibliography: Networks Centralities and Negative Weigths.bib
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+header-includes:
+- \usepackage{placeins}
+- \usepackage{fancyhdr}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{graphicx}
+- \usepackage{microtype}
+- \onehalfspacing
+- \counterwithin{figure}{section}
+- \counterwithin{table}{section}
+- \usepackage[utf8]{inputenc}
+- \usepackage[greek,english]{babel}
+- \renewcommand{\familydefault}{\sfdefault}
+- \usepackage{helvet}
+- \usepackage{mathtools}
+- \usepackage{amsmath}
+- \usepackage{sansmathfonts}
+- \newtheorem{theorem}{Theorem}
+- \newtheorem{mydef}{Definition}
+- \usepackage{multirow}
+- \usepackage{subcaption}
+- \usepackage{wrapfig}
+- \usepackage{array}
+---
+
+# Results
+
+## Data
+
+### Networks
+
+From BioGRID database [@Chatr-Aryamontri2015a; @Stark2006a], version 3.4.148, we downloaded *D.melanogaster's* protein-protein interaction (PPI) network. All physical interactions were selected (table \ref{summary_PPI}) and the giant component of the network was used as a benchmark.
+
+Signed networks are very important in systems biology because they include more information than "bare" networks, hence they are better representations of the real systems. Signed protein networks include the physical interactions between proteins as well as signs, activation - inhibition interactions. The first large scale signed protein interaction network was constructed in 2014 for *D.melanogaster's* proteome by [@Vinayagam2014b]. At the time of writing and to the author's knowledge no other signed protein interaction network exists. The data from [@Vinayagam2014b] are freely available for everyone to download. 
+
+\begin{table}[ht]
+\centering
+\caption{Summary of the signed PPI network}
+\label{summary_PPI}
+\begin{tabular}{ p{2cm} p{3cm}  p{3cm} p{3cm} p{2cm} }
+\hline \\ [-1.5ex]
+Type    & All \textit{D.melanogaster} network & Giant component of \textit{D.melanogaster} network & Complete signed network     & Giant component      \\ [1ex]
+\hline \\ [-1.5ex]
+Proteins & 8103 & 8006  & 3352                 & 3058                 \\
+Interactions    & 38364 & 37011 & 6094 & 5930 \\
+Positive  & 0   & 0 & 4109  & 3998 \\
+Negative  & 0   & 0 & 1985  & 1932 \\
+\hline
+\end{tabular}
+\end{table}
+
+The authors of [@Vinayagam2014b] integrated protein-protein interaction data, that are available in many databases, with data from RNAi screens to reveal activation-inhibition relationships. Their approach was validated with some already known activation-inhibition relationships derived from small scale experiments (literature). Also some previously unknown relationships were unraveled that were later confirmed experimentally, a result that showed the high predicted power of the approach.
+
+\begin{table}[h]
+\centering
+\caption{Sources of interactions of the signed PPI network comparison and summary}
+\label{source_summary_PPI}
+\begin{tabular}{ p{4cm} p{1.5cm} p{1.5cm} p{1.5cm} p{1.5cm} p{1.5cm}}
+\hline \\ [-1.5ex]
+Type    & Positive & Negative & NA & Different & Total  \\ [1ex]
+\hline \\ [-1.5ex]
+Sign score - All interactions & 4109  & 1985  & 0 & - & 6094   \\
+Sign score - Predicted & 3826  & 1865  & 0 & - & 5691   \\
+Sign score - Literature  & 309 & 125 & 0 & - & 434 \\
+Sign score - Duplicates  & - & - & 0 & - & 31 \\
+Co-express development correlation  & 4127 & 1873 & 94 & - & 6094 \\
+Comparison of Co-express development correlation \& Sign score interactions & 3008 & 834 & 94 & 2158 & 6094 \\
+\hline
+\end{tabular}
+\end{table}
+
+The integration of signs to the protein interaction network of *D.melanogaster* didn't come without a cost. As seen in the table \ref{summary_PPI} only $\approx 28 \%$ of the original proteins are included and even less, $\approx 16 \%$, of their original interactions. The original protein interactions which are  experimentally detected are estimated to represent only $\approx 20 \%$ of the real interactions [@Gavin2011; @Yu2008]. So the signed network contains about $\approx 3 \%$ of the expected real protein interactions of *D.melanogaster*.
+
+\begin{figure}[h]
+\includegraphics[width=0.6\textwidth]{../Figures/different_weights_densities.pdf}
+\centering
+\caption{Density of signed weights and gene expression correlation. Also we normalized the original signs by dividing all values with the maximum absolute value so the distribution lies in the $[-1,1]$.}
+\label{sign_density}
+\end{figure}
+
+The interactions between proteins of the signed protein interaction network are both directed and signed. The signs take scores in the interval $[-2.645751,4.123106]$ as seen in the density plot (Figure \ref{sign_density}). It is noticeable that values in the interval $(-1,1)$ are missing. This is due to the cutoff values in the interval $(-1,1)$ which was applied to reduce possible errors. Also we found that there were 31 duplicated interactions which is due to the inclusion of signs from literature. From these interactions we kept the ones from literature.
+
+\begin{wrapfigure}{R}{0.45\textwidth}
+  \begin{center}
+    \includegraphics[width=0.43\textwidth]{../Figures/degree_distribution_drosophila_network.pdf}
+    \caption{The degree distribution of the network is scale-free.}
+    \label{degree_dist}
+  \end{center}
+\end{wrapfigure}
+
+Another approach to add signs to a protein interaction network is to use gene expression data and then correlate the levels of expression between genes [@Ou-Yang2015a]. These correlations are sometimes used as signs of interactions though this approach is not widely accepted and in not consider a good practice. Nevertheless the authors compared gene expression time-course data with the signs and found big differences, 2158 signs have the opposite score (table \ref{source_summary_PPI}).
+
+The signed network is not connected but has a giant component of 3058 proteins and 5930 interactions. The degree distribution of the network is scale free, following a power law-like distribution (Figure \ref{degree_dist}). For the rest of this article when we refer to the network we will mean its giant component.
+
+### Protein essentiality
+
+To annotate the proteins of the signed network proteins with their essentiality consensus we used the freely available database: *Online GEne Essentiality database (OGEE)* [@Chen2012c]. [OGEE](http://ogee.medgenius.info/browse/) has 3 distinct labels for genes, essential, conditional and nonessential. In table \ref{table-OGEE} we can see that from all the 13373 genes of *D.melanogaster* only $\approx 2\%$ are essential. Essential genes in OGEE are those who were identified as essential consistently in all distinct experiments. On the hand, conditional are the genes that have been identified as essential in at least one experiment and nonessential in other experiments. 
+
+\begin{table}[hb]
+\centering
+\caption{Gene essentiality consensus from OGEE database}
+\label{table-OGEE}
+\begin{tabular}{ p{2cm} p{3cm} p{3cm} p{3cm} p{2cm} }
+\hline \\ [-1.5ex]
+Consensus    & All \textit{D.melanogaster's} proteins & Giant component of \textit{D.melanogaster} & Complete signed network     & Giant component      \\ [1ex]
+\hline \\ [-1.5ex]
+Nonessential & 13373      & 7224        & 3009                 & 2737                 \\
+Essential    & 267        & 215        & 154  & 146  \\
+Conditional  & 141        & 73       & 33                   & 29                   \\
+NA           & 0          & 494        & 156                  & 146                  \\
+Total        & 13781      & 8006       & 3352                 & 3058                 \\
+\hline
+\end{tabular}
+\end{table}
+
+From the annotation of OGEE data to the signed network we found 156 proteins that are not included in the database (NA values in table \ref{table-OGEE}). In all analyses we considered the conditionally essential proteins to be nonessential. Also for the decision trees inference we excluded the NA proteins, although we kept them when calculating the centrality indices.
+
+### Protein complexes
+
+Protein complexes are functional molecular units that consist of physically interacting proteins. In order to learn more about the proteins of the signed network we downloaded protein complex data from the COMPLEAT database [@Vinayagam2013a]. [COMPLEAT database](http://www.flyrnai.org/compleat/) has freely available data and also provides a platform for analyses for various types of data. We downloaded the protein complexes of *D.melanogaster* and their proteins. There are 2 types of complexes in COMPLEAT, those collected from individual experiments referred as *literature* and those inferred from 2 algorithms, *CFinder* and *NetworkBlast*. When we plotted the distribution of complexes size in terms of number of containing proteins we saw a pattern (Figures \ref{complex_dist_compleat_methods} and \ref{complex_dist_compleat}). NetworkBlast, which predicted $\approx 50\% (2893)$ of the complexes (table \ref{summary_compleat}), has a upper limit of 16 proteins in complex size (Figures \ref{complex_dist_compleat_methods} and \ref{complex_dist_meth_yeast_compleat}). This has an impact in analyses so for the rest of the article we will distinguish the complexes in 2 categories, All complexes and Literature complexes. See more about the COMPLEAT database and the bias we discovered in Appendix \ref{append_compleat}. 
+
+
+## Evaluation of essentiality prediction methods
+
+After the calculation of centrality indices for all network proteins we created decision trees for essentiality consensus prediction. We chose the centralities as variables for decision rules from which we constructed three trees using the algorithms from rpart package, C4.5 and C5.0. The C4.5 algorithm created a tree with higher complexity, more branches, than the rpart and C5.0 algorithms (Figure \ref{fig_C45}). Also the C4.5 algorithm had better precision, because it had less false positives but lower recall than the other algorithms (table \ref{confusion_table}, equations \ref{precision} and \ref{recall}). In addition, rpart algorithm used the weighted degree but with the absolute values of signs and the algorithms C4.5 and C5.0 used positive weighted degree (equation \ref{pos-wei-deg-centr}), positive degree (equation \ref{pos-deg-centr}) and betweenness (equation \ref{bet-centr}) as decision rules. The latter is a new and interesting result because it may represent a new property of essential proteins in signed networks.
+
+
+\begin{table}[hb]
+\centering
+\caption{Confusion matrix for the 3 different algorithms of decision trees.}
+\label{confusion_table}
+\begin{tabular}{ p{3cm} p{2cm} p{2cm} p{2cm} }
+\hline \\ [-1.5ex]
+Type    & C5.0 & rpart & C4.5 \\ [1ex]
+\hline \\ [-1.5ex]
+True Positives & 22 & 23 & 21 \\
+False Negatives  & 124 & 123 & 125 \\
+True Negatives & 2762 & 2761 & 2765\\
+False Positives & 4 & 5 & 1 \\
+Precision  & 0.846 & 0.821 & 0.955\\
+Recall  & 0.151 & 0.158 & 0.144 \\
+\hline
+\end{tabular}
+\end{table}
+
+
+\begin{figure}
+    \centering
+    \begin{subfigure}[b]{0.45\textwidth}
+        \includegraphics[width=\textwidth,trim=2.5cm 2.5cm 2.5cm 2.5cm,clip]{../Figures/Decision_tree_rpart.pdf}
+        \caption{rpart package algorithm}
+        \label{fig_rpart}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.45\textwidth}
+        \includegraphics[width=\textwidth]{../Figures/Decision_tree_C5_0.pdf}
+        \caption{C5.0 algorithm}
+        \label{fig_C50}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.5\textwidth}
+        \includegraphics[width=\textwidth]{../Figures/Decision_tree_RWeka.pdf}
+        \caption{C4.5 algorithm}
+        \label{fig_C45}
+    \end{subfigure}
+    \caption{Trees from different algorithms. \textbf{(a)} and \textbf{(b)} generated oversimplified trees but \textbf{(c)} generated a little more complex and more precise tree.}
+    \label{fig_trees}
+\end{figure}
+
+
+We used ROC curve, Precision Recall curve and Jackknife curve to compare the predictability power of centralities and decision trees (Figure \ref{evaluation_methods}). 
+
+\begin{figure}
+    \centering
+    \begin{subfigure}[t]{0.475\textwidth}
+        \includegraphics[height=8cm, keepaspectratio,trim=0cm 0cm 6cm 0cm,clip]{../Figures/Centralities_Precision_Recall_Curve.pdf}
+        \caption{Precision Recall curve. rpart and C5.0\\ methods have the above curves because they\\ generated trees with one decision rule (Figure \ref{fig_trees}).}
+        \label{pr_curve}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.475\textwidth}
+        \includegraphics[height=8cm, keepaspectratio,trim=0cm 0cm 6cm 0cm,clip]{../Figures/Centralities_Successful_prediction_essentiality.pdf}
+        \caption{Jackknife curve. The dotted diagonal represents the best possible prediction.}
+        \label{jackknife_curve}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.8\textwidth}
+        \hspace{2cm}
+        \includegraphics[height=8cm, keepaspectratio]{../Figures/Centralities_ROC_Curve.pdf}
+        \caption{ROC curve. The dotted diagonal represents the random predictions.}
+        \label{ROC_curve}
+    \end{subfigure}
+    \caption{Evaluation methods for the different prediction methods of protein essentiality.}\label{evaluation_methods}
+\end{figure}
+
+In the original PPI network of *D.melanogaster* degree scores very low although in the signed network is a good essentiality predictor. In Figure \ref{evaluation_methods} we see that the best methods for predicting protein essentiality consensus from the signed network are the decision trees. The rpart algorithm surpasses all centralities in all methods ($AUC = 0.881$). Quite similar performance is delivered from the C4.5 algorithm ($AUC = 0.874$). Degree centrality is the best performed centrality with $AUC = 0.804$. Worth mentioning is the low performance of betweenness centrality ($AUC = 0.609$) and closeness centrality ($AUC = 0.673$). In the Jackknife curve (Figure \ref{jackknife_curve}) we see that after the 25 proteins there is sudden decrease in the essential protein accumulation from all best methods. Degree centrality accomplished the highest retrieval of essential proteins. Decision trees even though had faster essential protein accumulation (i.e higher precision) reached a plateau in 23 essential proteins. Also closeness centrality eventually and gradually reached the top methods in correct essential protein prediction.
+
+\newpage
+
+## Essential subgraph
+
+We investigated the subgraph of essential proteins of the signed network which contains only essential proteins and their interactions (Figure \ref{essential_cluster}). What we found was that essential proteins form a cluster which contains only positive - activation interactions. There are 3 negative interactions but they are from conditionally essential proteins. To investigate further this unexpected result we studied the inner structure of the essential cluster with graph theory tools and we performed Gene Ontology annotation.
+
+\begin{figure}[h]
+\includegraphics[width=\textwidth]{../Figures/Subnetwork_Essential_Proteins.pdf}
+\centering
+\caption{Interactions between essential proteins are positive. The only negative interactions are from conditionally essential proteins.}
+\label{essential_cluster}
+\end{figure}
+
+### Decomposition of essential cluster
+
+The goal of the Perron - Decomposition is to decipher how the information flows in the network. Using Tarjan's algorithm [@Tarjan1971a] we found the strongly connected components (or equivalently the irreducible components, Theorem \ref{strong_redu} ) of the essential cluster (table \ref{essential_cluster_table}). There is only one strongly connected component with 20 proteins, all the other proteins are singular components (Figure \ref{essential_component} ). Information in the strongly component can reach all proteins from any protein in the component (Definition \ref{strongly_def}). 
+
+\begin{table}[ht]
+\centering
+\caption{Essential cluster information}
+\label{essential_cluster_table}
+\begin{tabular}{ p{7cm} p{7cm} }
+\hline \\ [-1.5ex]
+Type    & Values \\ [1ex]
+\hline \\ [-1.5ex]
+Essential proteins in network & 146 + 29 conditional  \\
+Connected essential cluster  & 36 proteins, 243 positive interactions \\
+Strongly connected components  & 17 components (16 singular) \\
+Irreducible component  & 20 proteins, 118 positive interactions\\
+Perron–Frobenius eigenvalue of irreducible component  & 4.0210\\
+Number of equal maximum eigenvalues & $k=1$ \\
+\hline
+\end{tabular}
+\end{table}
+
+The essential cluster is weakly connected so it is reducible which by Definition \ref{reducible_def} means that its adjacency matrix can take an upper triangular form. Ultimately this means that some proteins have only outgoing interactions and some only incoming interactions. So information in the essential cluster has direction. In Figure \ref{perron_frob_net} we reconstructed the network using the components (16 singular and 1 with 20 proteins) to present the direction of the essential cluster. Information can move only from top to bottom. That way we can divide the proteins into 3 categories, input, processing and output. In input are the proteins 14,15,16,17, in processing are the proteins 2,3,4,5,11,13 and the irreducible component 8 and finally in the output are the proteins 1,6,7,9,10 and 12 (Figure \ref{perron_frob_net}).
+
+\begin{figure}[h]
+\includegraphics[width=\textwidth,trim=1.5cm 1.5cm 1cm 1cm,clip]{../Figures/Subnetwork_Essential_Proteins_Links_Strongly.pdf}
+\centering
+\caption{Essential proteins strongly connected component.}
+\label{essential_component}
+\end{figure}
+
+Next we further explored the structure of the irreducible component (Figure \ref{essential_component}). Using the strong theorem from Perron and Frobenius (Theorem \ref{Perron_Frobenius}) we calculated the eigenvalues of the component and we found there is only one positive real eigenvalue equal to the spectral radius of the graph (table \ref{essential_cluster_table}). We conclude that the essential strongly connected component has primitive adjacency matrix (Definition \ref{primitive}) and it doesn't have cycles of the form of matrix \ref{cycle_matrix} (Theorem \ref{Perron_Frobenius}).
+
+\begin{figure}[h]
+\includegraphics[width=\textwidth,trim=3cm 3cm 2cm 2cm,clip]{../Figures/Subnetwork_Essential_cluster_Frobenius_Decomposition_Components_network.pdf}
+\centering
+\caption{Perron - Frobenius decomposition. The purple node (8) is the strongly connected component. The links thickness increases with the number of interactions between the components.}
+\label{perron_frob_net}
+\end{figure}
+
+### Gene ontology annotation
+
+To examine the functions of proteins in the essential cluster we annotated them to Gene Ontology. First we found that 317 proteins, from the signed network, had no annotation in any ontology and 2378 proteins were annotated in all three ontologies (table \ref{ontology_annotation}). We used the Biological Process ontology of Gene Ontology and we performed Fisher's Exact Test to find statistically significant terms. As a background protein pool we used all the proteins in the signed protein network. The test resulted in 58 significant GO terms with $p-value < 0.01$ (table \ref{ontology_annotation_terms}).
+
+\begin{table}
+\centering
+\setlength\tabcolsep{2pt}
+\begin{minipage}[t]{0.6\textwidth}
+\centering
+\caption{Gene ontology annotations of proteins of the signed network in the three ontologies}
+\label{ontology_annotation}
+\begin{tabular}[t]{ m{2cm} m{1.5cm} | m{1.7cm} m{2cm}}
+\hline \\ [-1.5ex]
+Ontology    & Network Proteins & Number of ontologies & Number of proteins\\ [1ex]
+\hline \\ [-1.5ex]
+Biological Process & 2858 & 0 & 317 \\
+Molecular Function  & 2721 & 1 & 214\\
+Cellular Component & 2655 & 2 & 443\\
+None  & 317 & 3 & 2378 \\
+\hline
+\end{tabular}
+\end{minipage}%
+\hfill
+\begin{minipage}[t]{0.35\textwidth}
+\centering
+\caption{Biological process ontology Fisher's exact test significant terms}
+\label{ontology_annotation_terms}
+\begin{tabular}[t]{ m{3cm} m{2cm} }
+\hline \\ [-1.5ex]
+Method  & Number of significant terms\\ [1ex]
+\hline \\ [-1.5ex]
+Classic p-value & 58\\
+FDR  & 23\\
+Bonferroni's correction & 21\\
+\hline
+\end{tabular}
+\end{minipage}
+\end{table}
+
+The subgraph of Biological Process Ontology with the significant terms is shown in Figure \ref{go_term_graph}. After the enrichment of the essential protein cluster we found the following processes: 
+
+\begin{enumerate}
+\item Protein catabolism
+\begin{enumerate}
+\item Proteasome subunits
+\item Ubiquitin action
+\item Response to stress
+\item ATPases
+\end{enumerate}
+\item ATP biosynthesis
+\item Hydrogen membrane transport
+\item Cell cycle G1/S transition
+\end{enumerate}
+
+The essential cluster participates in these processes and operates with activating interactions. 
+
+Furthermore, proteins and their significant gene ontology terms represent a bipartite network. We projected this bipartite network to its terms to create the Functional network of significant terms (Figure \ref{func_go_term_graph}). In this network two terms interact with each other if they share a protein. The Functional network is dense and it shows how interconnected the catabolic process and nucleotide synthesis are in the essential cluster.
+
+\begin{figure}[!ht]
+\includegraphics[width=0.95\textwidth]{../Figures/Go_graph_singificant_vertical.pdf}
+\centering
+\caption{Singular enrichment analysis. The left part of the graph is mostly for the proteasome and catabolism in general. The right part is mainly for response to stress and the middle part for nucleotide synthesis. The most significant terms are for the catabolism because red color is for very low p-values ($<10^-4$).}
+\label{go_term_graph}
+\end{figure}
+
+
+\begin{figure}[!ht]
+\includegraphics[width=0.95\textwidth,trim=0cm 1.25cm 0cm 1.25cm,clip]{../Figures/Functional_net_GO_essential_cluster.pdf}
+\centering
+\caption{Functional enrichment analysis.}
+\label{func_go_term_graph}
+\end{figure}
+
+\newpage
+
+## Modular essentiality
+
+Proteins interact with each other temporally and conditionally to form complexes. These complexes are the functional machines that participate in biological processes. We tested the complexes of \textit{D.melanogaster} to see how the essentiality consensus of their proteins is distributed. Some authors claim that a complex would either contain mostly essential proteins or not at all [@Hart2007; @Ryan2013b]. For all complexes from COMPLEAT database we calculated the essentiality fraction (equation \ref{essential_fr}). Half of protein complexes have essentiality fraction in $[0,0.2]$ (Figure \ref{complex_hist_sentiality}). In order to avoid any bias due to complex size we plotted it against essentiality fraction and we didn't find any correlation (Figure \ref{complex_size_essentiality}). 
+
+We bootstrapped the essential proteins of complexes to generate a random distribution of complexes for essentiality fraction. These are the expected values. Then we binned the data to 5 equally spaced intervals. The log ratio (equation \ref{log_ration}) of observed to to expected number complexes was calculated (Figure \ref{complex_log_ratio_essentiality}) in each bin. In the bin $[0,0.2]$ the log ratio is positive, although low, so the observed values are higher then the expected. This is also the case in the $(0.6,0.8]$ bin. There is also a difference between all complexes and literature complexes in the bin $(0.4,0.6]$ with all complexes having more abundance than expected bin which might be due to the bias of the predicted complexes from NetworkBlast (see Appendix \ref{append_compleat}). In addition, there is only one complex with essentiality fraction in $(0.8,1]$ in \textit{D.melanogaster} which is lower than expected and contradicting to the modularity hypothesis (table \ref{log_complex_essential_table}). In Figure \ref{cumulative_complex_essen} there are the bootstrapped distributions for each bin and with vertical lines are the observed number of complexes. All the observed values are statistically substantial in one-tailed tests. These results are not so strong about the modularity of essentiality of complexes of \textit{D.melanogaster} as it is for unicellular organisms.
+
+\begin{figure}
+    \centering
+    \begin{subfigure}[t]{0.475\textwidth}
+        \includegraphics[height=8cm, keepaspectratio,trim=0cm 0cm 0cm 0cm,clip]{../Figures/Essentiality_Fraction_Complexes.pdf}
+        \caption{Histogram of the complexes and essentiality fraction.}
+        \label{complex_hist_sentiality}
+    \end{subfigure}
+    \begin{subfigure}[t]{0.475\textwidth}
+        \includegraphics[height=8cm, keepaspectratio,trim=0cm 0cm 0cm 0cm,clip]{../Figures/Essentiality_Fraction_and_Size_of_Complexes.pdf}
+        \caption{Scatterplot for complex size and essentiality fraction. There isn't any indication that these variables are correlated.}
+        \label{complex_size_essentiality}
+    \end{subfigure}
+    \begin{subfigure}[b]{0.8\textwidth}
+        \hspace{-0.5cm}
+        \includegraphics[height=8cm, keepaspectratio]{../Figures/Essentiality_Fraction_Complexes_Bootstrap.pdf}
+        \caption{Log ratio of the observed values to the expected.}
+        \label{complex_log_ratio_essentiality}
+    \end{subfigure}
+    \caption{Essentiality of the \textit{D.melanogaster's} protein complexes. Almost half of the complexes have very low essentiality fraction. Also there appears to be modularity in the essentiality of complexes}\label{complex_modular}
+\end{figure}
+
+
+
+\begin{figure}[h]
+\includegraphics[width=\textwidth]{../Figures/Essentiality_Fraction_Ggplot_Cumulative_Dist_Complexes_Bootstrap.pdf}
+\centering
+\caption{Cumulative distributions of bootstrapped essentiality of the complexes. The vertical lines are the observed number of complexes belonging to the respective bin.}
+\label{cumulative_complex_essen}
+\end{figure}
+
+
+
+\begin{table}[hb]
+\centering
+\caption{Comparison of the observed abundance of complexes in respect to essentiality fraction with a bootstrapped distribution}
+\label{log_complex_essential_table}
+\begin{tabular}{ p{3cm} p{3cm} p{3cm} p{3cm} p{3cm}}
+\hline \\ [-1.5ex]
+Type    & Essentiality fraction & Number of complexes & Expected complexes & $Log_{2}\frac{observed}{expected}$ \\ [1ex]
+\hline \\ [-1.5ex]
+\multirow{5}{*}{All complexes} & [0, 0.2] & 4893 & 4823.73 & 0.021 \\
+& (0.2, 0.4] & 222 & 396.383 & -0.836 \\
+& (0.4, 0.6] & 173 & 93.825 &  0.883 \\
+& (0.6, 0.8] & 37 & 8.902 & 2.055 \\
+& (0.8, 1] & 1 & 3.323 & -1.732\\
+\hline \\ [-1.5ex]
+\multirow{5}{*}{Literature complexes} & [0, 0.2] & 1907 & 1810.119 & 0.075 \\
+& (0.2, 0.4] & 90 & 156.544 & -0.799 \\
+& (0.4, 0.6] & 37 & 70.278 &  -0.926 \\
+& (0.6, 0.8] & 9 & 4.7286432160804 & 0.928 \\
+& (0.8, 1] & 1 & 2.58397365532382 & -1.370\\
+\hline
+\end{tabular}
+\end{table}
+
+
+

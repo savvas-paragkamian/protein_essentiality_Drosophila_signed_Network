@@ -1,0 +1,251 @@
+---
+bibliography: Networks Centralities and Negative Weigths.bib
+fontsize: 12pt
+geometry: margin = 1.2in
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+link-citations: true
+urlcolor: blue
+citecolor: black
+header-includes:
+- \usepackage{placeins}
+- \usepackage{fancyhdr}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{graphicx}
+- \usepackage{microtype}
+- \onehalfspacing
+- \counterwithin{figure}{section}
+- \counterwithin{table}{section}
+- \usepackage[utf8]{inputenc}
+- \usepackage[greek,english]{babel}
+- \renewcommand{\familydefault}{\sfdefault}
+- \usepackage{helvet}
+- \usepackage{mathtools}
+- \usepackage{amsmath}
+- \usepackage{sansmathfonts}
+- \newtheorem{theorem}{Theorem}
+- \newtheorem{mydef}{Definition}
+- \selectlanguage{english}
+- \usepackage{multirow}
+- \usepackage{subcaption}
+---
+
+# Methods
+
+```{r, echo=FALSE, warning=FALSE, message=FALSE, eval=FALSE}
+library(bibtex)
+
+rstudiocite <- RStudio.Version()
+
+packages_used <- c('base','ROCR','readxl','readr', 'ggplot2','igraph', 'ggraph', 'scales', 'gridExtra', 'reshape2', 'dplyr', 'knitr','rmarkdown', 'bibtex','citr','tidyr', 'Matrix', 'rpart', 'rpart.plot', 'RWeka', 'C50', 'ROCR', 'RBGL', 'vegan', 'bipartite', 'entropy', 'AnnotationDbi', 'org.Dm.eg.db', 'GO.db', 'topGO', 'Rgraphviz', 'GSEABase')
+
+bibtex::write.bib(packages_used,file = "thesis_r_packages.bib", append = TRUE)
+bibtex::write.bib(rstudiocite$citation,file = "thesis_r_packages.bib", append = TRUE)
+
+```
+
+ 
+
+## Centralities
+
+We consider a directed, simple network $G(V,E)$ with a set of $N$ nodes $V$ and an ordered set of edges $E$. A node $v \epsilon V$ denotes a protein and an edge $e(v,u) \in E$ denotes a directed interaction from protein $v$ to protein $u$. Each edge has been assigned to a signed weight $w_{v,u} \in [-1,1]$.
+
+The essentiality consensus of a protein in the protein - protein interaction network is most commonly predicted by centrality measures [@Jalili2016a]. In this work we used the degree, betweenness, weighted betweenness, closeness and information degree centrality. The historically first centrality used for the prediction of the essential proteins is the degree centrality in the influential paper [@Jeong2001a] which introduced the **centrality - lethality rule**. The degree centrality (DC) of a node v is defined as :
+
+\begin{equation}
+\label{deg-centr}
+DC(v)=deg(v),
+\end{equation}
+
+where deg(v) is the number of neighbors of node v. 
+
+Degree centrality predicts that hubs are more likely to be essential than non - hubs. This is a simplified view because there are essential proteins that are not hubs. 
+
+Because the network is signed we can further distinguish the degree to positive and negative degree. Positive degree (PD): 
+
+\begin{equation}
+\label{pos-deg-centr}
+PD(v)=deg^{+}(v),
+\end{equation}
+
+where $deg^{+}(v)$ is number of nodes the have positive interactions with node v. 
+
+Also because the network is weighted we define Positive Weighted Degree Centrality (PWDC) as: 
+
+\begin{equation}
+\label{pos-wei-deg-centr}
+PWDC(v)=\sum_{u}^{N}(w_{v,u}^{+} + w_{u,v}^{+}),
+\end{equation}
+
+where $w_{v,u}^{+}$ are the positive weights from node $v$ to its $u$ neighbors and $w_{u,v}^{+}$ is the reverse.
+
+Another classification of proteins in respect to network topology is to examine whether they are *bottlenecks*. Bottlenecks are the nodes that are located between highly connected clusters and their importance is measured through betweenness centrality (BC) [@Freeman1979g; @Joy2005a; @Yu2007a]. Betweenness centrality (BC) of a node v is defined as: 
+
+\begin{equation}
+\label{bet-centr}
+BC(v)=\sum_{s\neq t \neq v \in V}^{} \frac{g_{st}(v)}{g_{st}},
+\end{equation}
+
+where $g_{st}$ is the number of all geodesic directed paths between all pairs of nodes, except pairs with v, and $g_{st}(v)$ is the number of geodesics that pass through node v. 
+
+Weighted betweenness centrality (WBC) is defined as : 
+
+\begin{equation}
+\label{weight-bet-centr}
+WBC(v)=\sum_{s\neq t \neq v \in V}^{} \frac{g_{st}^w(v)}{g_{st}^w},
+\end{equation}
+
+where the geodesic distance is $g_{st}^w=min(\sum w_{st})$, that is the minimum distance between nodes s and t is the path with the minimum sum of weights. In this implementation of betweenness, edge weights must be non negative numbers and higher values of weights have negative impact on path distance. So we took the absolute values of edge $E$ weights of $G$. Note that this is a crude method of handling weights that in our case isn't biologically appropriate but nevertheless we have included it in the analysis for comparison reasons. 
+
+Another centrality index we used is closeness centrality (CC) which is defined as : 
+
+\begin{equation}
+\label{clos-centr}
+CC(v)=\sum_{v\neq t \in V}^{} \frac{1}{g_{v,t}},
+\end{equation}
+
+And finally we computed the information centrality (IC) defined as : 
+
+\begin{equation}
+\label{info-centr}
+IC(v)=information centrality,
+\end{equation}
+
+The computations of the centralities were performed in R using the igraph package [@igraph] except from the information centrality which was calculated manually. Also they were applied on the giant component of the original network.
+
+## Decision trees
+
+Decision trees are supervised machine learning tools used to build classification models [@Kotsiantis2013; @Quinlan1986; @Kabacoff2011]. We implemented decision trees on the centrality measures mentioned before to test if the integration of centralities provides better results than single centrality indices for the prediction of essential proteins. Furthermore, we excluded the proteins from the giant component that weren't annotated with essentiality consensus (NA consensus). We used three algorithms, the algorithm in the rpart package [@rpart], the C4.5 algorithm from the J48 function in RWeka package [@RWeka1] and the latest algorithm C5.0 from the C5.0 package [@C50]. After the tree creation each protein was assigned probabilities of essentiality from the 3 different algorithms.
+
+
+## Method comparison
+
+In order to evaluate the performance of each method for predicting essentiality we used 3 methods, the precision - recall, the ROC curve and the Jackknife curve [@Holman2009; @Manning2008]. All these methods use the statistical terms :
+
+* True positives (TP) : essential proteins correctly predicted as essential
+* False positives (FP) : nonessential proteins falsely predicted as essential
+* True negatives (TN) : nonessential proteins correctly predicted as nonessential
+* False negatives (FN) : essential proteins falsely predicted as nonessential
+
+These terms form the confusion matrix of a binary classifier which in our case is essentiality consensus and are used to calculate the following fractions : 
+
+\begin{equation}
+\label{precision}
+Precision = \frac{TP}{TP + FP}
+\end{equation}
+
+\begin{equation}
+\label{recall}
+Recall = \frac{TP}{TP + FN}
+\end{equation}
+
+\begin{equation}
+\label{fpr}
+False\ Positive\ Rate = \frac{FP}{TP + FN}
+\end{equation}
+
+Precision (equation \ref{precision}) is the ratio of the number of correct predictions to the total number of predictions. On the other hand recall (equation \ref{recall}) is the ratio of the number of correct predictions to the total number of possible correct predictions. Using these measures we can plot the Precision - Recall curve through an iterative process. In the first iteration $k$ top ranked proteins (in terms of a variable, i.e degree) are retrieved and the precision and recall are measured. In the next iteration $k+1$ proteins are retrieved, if the protein is nonessential then recall remains the same but precision decreases. If the protein is essential then both recall and precision increase. 
+
+False positive rate (equation \ref{fpr}) is the ratio of the wrong predictions to the total number of possible correct predictions. This measure and the recall measure, also called true positive rate, are plotted to create the receiver operating characteristic curve (ROC curve). The ROC curve of a random predictor is the $y=x$ line, any predictor above this line is considered better. The area under ROC curve is called AUC. The ROC curve is plotted with similar way as the precision - recall curve. Both methods were computed using the ROCR package [@ROCR]. 
+
+The Jackknife curve was first presented in [@Holman2009] and is a simple alternative method to evaluate predicting tools for binary classifiers. In our case it expresses the relationship between the number of essential proteins in respect to the number of top ranked proteins retrieved based on a variable. This curve is created by incrementally increasing the number of retrieved proteins and the theoretical 100% successful model is plotted in the $y=x$ line. 
+
+## Perron - Frobenius decomposition
+
+The topology structure of a network is possible to reflect its function. The work of Frobenius and Perron on matrices can provide some useful insights when implemented on graphs. The following definitions and theorems are well documented with proofs and further details in the books of [@Graham] and [@MacDuffee1933].
+The Perron - Frobenius graph decomposition can illustrate the flow of information in a directed network. If a network is strongly connected as defined in \ref{strongly_def} then the information can reach all nodes from all nodes. This means that there is not distinction between nodes or clusters, in terms of information distribution, in the network. In addition, we can explore further the inner structure of a strongly connected component using the paragraph 5 of theorem \ref{Perron_Frobenius}\footnote{Theorem \ref{Perron_Frobenius} is the famous theorem that was proved independently from Perron in 1907 for positive matrices and from Frobenious in 1912 for non-negative matrices.}. After the calculations of the eigenvalues we can evaluate if there are more than one eigenvalues that equal to spectral radius of the component. If this is true, then there exist a cycle in the component and its permuted adjacency matrix takes the form of matrix \ref{cycle_matrix}.
+
+If the network is weakly connected, or equally its adjacency matrix is reducible as stated in theorem \ref{strong_redu}, then we have to find its strongly connected components. The most efficient algorithm to perform this task was developed by [@Tarjan1971a] and is included in the *Graph BOOST Library* [@Siek2001] which has an interface in R [@RBGL]. By implementing Tarjan's algorithm we identify the network's strongly connected components and single nodes that aren't participating in any strongly connected component. After we can partition the network into tree components:
+
+1. Input: Nodes that have only out edges
+2. Processing: Nodes that have incoming and outgoing edges
+3. Output: Nodes that have only incoming edges
+
+This structure indicates that information flow is directed in the network.
+
+
+\begin{mydef}[Strongly connected]
+\label{strongly_def}
+A directed graph with n nodes is strongly connected if, for any ordered pair $(P_i , P_j)$ of nodes, with $1 \le i,j \le n$, there exist a direct path connecting $P_i$ to $P_j$.
+\end{mydef}
+
+\begin{theorem}
+\label{strong_redu}
+An $n \times n$ complex matrix A is irreducible if and only if its directed graph $G(A)$ is strongly connected.
+\end{theorem}
+
+
+\begin{mydef}[Reducibility]
+\label{reducible_def}
+A $n\times n$ complex matrix A, is reducible if there exists a $n \times n$ permutation \footnote{Permutation matrix is a square matrix that has one entry unity in each row and column and zeros elsewhere.} matrix such that A takes an upper triangular form:
+  \begin{equation}
+  \label{reducible_matrix}
+  PAP^T = 
+    \begin{pmatrix}
+    B & C \\
+    0 & D \\
+    \end{pmatrix},
+  \end{equation}
+where B and D are square matrices. If there isn't such permutation then A is irreducible. In case A is reducible and B or D are also reducible then they are further permutated to components. This process is repeated for as many times needed for all the upper triangular components of A to be irreducible.
+\end{mydef}
+
+\begin{theorem}[Frobenius, 1912]
+\label{Perron_Frobenius}
+When A is a square, nonnegative and irreducible matrix then : 
+  \begin{enumerate}
+    \item A has a positive real eigenvalue equal to its spectral radius, r.
+    \item To r there corresponds an eigenvector $x > 0$.
+    \item r increases when any entry of A increases
+    \item r is a simple eigenvalue of A
+    \item if A has has $h$ eigenvalues $\lambda_1,\lambda_2,\dots,\lambda_h$ equal to its spectral radius r $(|\lambda_1|=|\lambda_2|=\dots=|\lambda_h|=r)$ and $h > 0$, then A can be permuted to the following "cyclic" form:
+    \begin{equation}
+    \label{cycle_matrix}
+      PAP^T = 
+      \begin{pmatrix}
+      O & A_{1,2} & O & \cdots & O \\
+      O & O & A_{2,3} & \cdots & O \\
+      \vdots  & \vdots  & \vdots & \ddots & \vdots  \\
+      O & O & O & \cdots &  A_{h-1,h}\\
+      A_{h,1} & O & O & \cdots & O
+      \end{pmatrix},
+    \end{equation}
+  \end{enumerate}
+  where there are square blocks along the main diagonal.
+\end{theorem}
+
+
+\begin{mydef}[Primitive matrix]
+\label{primitive}
+If a irreducible matrix $A \ge 0$ has $h$ eigenvalues $\lambda_1,\lambda_2,\dots,\lambda_h$ equal to its spectral radius r $(|\lambda_1|=|\lambda_2|=\dots=|\lambda_h|=r)$, then A is called \textbf{primitive} if $h=1$ and \textbf{imprimitive} if $h > 1$. In the latter case h is called index of impimitivity of A.
+\end{mydef}
+
+
+## Enrichment analyses
+
+We performed gene ontology singular enrichment analysis in order to decipher the biological processes that are over-represented in our protein set [@Ashburner2000b; @Rhee2008a]. We used R bioconductor packages AnnotationDbi [@AnnotationDbi] and org.Dm.eg.db [@org.Dm.eg.db] for *D.melanogaster's* protein ID conversion, GO.db [@GO.db] for protein ID mapping on gene ontology terms and topGO [@topGO] to facilitate Fisher's exact test for over-representation of biological process terms. Fisher's exact test uses a background distribution of GO terms and occurrences that is compared with a specific test. In our case, we used all protein IDs of the signed network of *D.melanogaster* [@Vinayagam2014b] as a background to test a subset of this network with essential interacting proteins (Figure \ref{essential_cluster}). From the statistical test we obtained the biological process terms associated with a p-value, a bonferroni correction and FDR. We choose to use the simple p-value at a=0.5 significance level. It is worth noticing that Fisher's exact test as well as other similar tests (i.e hypergeometric test) share the same assumption for the null hypothesis, that the probabilities for the selection of each gene are equal [@Rivals2007]. But it turns out that they are not because the structure of gene's ontology bipartite network of genes and gene terms has a heavy tail degree distribution and hence these tests are biased to high degree terms [@Glass2014]. The authors of [@Glass2014] created an algorithm that escaped this bias.
+
+Singular enrichment analysis results in a long format table with one column representing the statistically significant GO terms and another column with the protein IDs. This can be considered as a bipartite network with the 2 sets of nodes being GO terms and the protein IDs belonging to them. By projecting the bipartite network to the one-mode network of GO terms we investigate the functional relationships between GO terms. This analysis is called functional enrichment analysis.
+
+## Modular essentiality
+
+Each protein complex has many proteins and each protein can participate in many complexes. How are the essential proteins distributed amongst complexes? In order to answer this question we have to do a statistical test with the hypothesis claiming that the distribution of essential proteins in complexes is random. The null distribution was created using the bootstrap procedure. We performed sampling with replacement to the essentiality consensus of the proteins of complexes for 1000 rounds using the sample() function of base R. That way complexes had always the same size. After we calculated the essentiality fraction (EC) of a complex $c_{i}$ which is defined as: 
+
+\begin{equation}
+\label{essential_fr}
+EC(c_{i}) = \frac{number\ of\ essential\ proteins\ in\ c_{i}}{total\ proteins\ of\ c_{i}} \in [0,1]
+\end{equation}
+
+$EC(c_{i})$ was calculated for the original data and for each one of the 1000 permutations. Then we sorted the complexes in 5 equally sized bins according to their essentiality fraction. Afterwards, for each bin of the original data and the 1000 permutations we counted the included complexes. So for each bin we had a null distribution for hypothesis testing and one-tailed p-value calculation. Next we calculated the mean number of complexes in each bin of the permutations in order to compare the expected with the observed number of complexes. The comparison was made with the log ratio:
+
+\begin{equation}
+\label{log_ration}
+Log-ratio(bin(EC)) = log_{2}(\frac{number\ of\ complexes \in bin(EC)}{mean\ estimated\ number\ of\ complexes \in bin(EC)})
+\end{equation}
+
+
+## Tools
+
+All the calculations and analyses were done in R [@base] using the R Studio [@RStudioTeam2016] interface. Data handling and manipulation were performed with the packages dplyr [@dplyr], tidyr [@Wickham2017] and readr [@readr]. Data visualization was done with the packages ggplot2 [@ggplot2] and ggraph [@ggraph] and graphic design of Figures \ref{bottleneck_hub} and \ref{complex_net_communities} was done with AUTODESK\textsuperscript{\textregistered} GRAPHIC application. In addition, all scripts were written in rmarkdown [@rmarkdown] with text alongside the code so all results are easily reproducible [@Peng2011; @Piccolo2016]. The machine used is a late 2013 model Macbook Pro with 13" retina screen, 2.4GHr Intel Core i5 processor, 8GB RAM memory and macOS Sierra operating system. The thesis was conducted in R Studio using rmarkdown and \LaTeX.

@@ -1,0 +1,40 @@
+---
+output: pdf_document
+header-includes:
+- \usepackage{placeins}
+- \usepackage{fancyhdr}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{graphicx}
+- \usepackage{microtype}
+- \onehalfspacing
+- \counterwithin{figure}{section}
+- \counterwithin{table}{section}
+- \renewcommand{\familydefault}{\sfdefault}
+- \usepackage{helvet}
+- \usepackage{mathtools}
+- \usepackage{amsmath}
+- \usepackage{sansmathfonts}
+- \newtheorem{theorem}{Theorem}
+- \newtheorem{mydef}{Definition}
+- \usepackage[utf8]{inputenc}
+- \usepackage[greek,english]{babel}
+---
+\selectlanguage{english}
+
+\selectlanguage{greek}
+
+\vspace{8 cm}
+...............
+
+Σάββας Παραγκαμιάν
+Πτυχιούχος Βιολόγος Π.Κ.
+
+\vspace{3 cm}
+\selectlanguage{english} Copyright © \selectlanguage{greek} Σάββας Παραγκαμιάν, 2017
+Με επιφύλαξη παντός δικαιώματος.\selectlanguage{english}  All rights reserved.
+
+\selectlanguage{greek}Απαγορεύεται η αντιγραφή, αποθήκευση και διανομή της παρούσας εργασίας, εξ ολοκλήρου ή τμήματος αυτής, για εμπορικό σκοπό. Επιτρέπεται η ανατύπωση, αποθήκευση και διανομή για σκοπό μη κερδοσκοπικό, εκπαιδευτικής ή ερευνητικής φύσης, υπό την προϋπόθεση να αναφέρεται η πηγή προέλευσης και να διατηρείται το παρόν μήνυμα. Ερωτήματα που αφορούν τη χρήση της εργασίας για κερδοσκοπικό σκοπό πρέπει να απευθύνονται προς τον συγγραφέα.
+Οι απόψεις και τα συμπεράσματα που περιέχονται σε αυτό το έγγραφο εκφράζουν τον συγγραφέα και  δεν πρέπει να ερμηνευτεί ότι εκφράζουν τις επίσημες θέσεις του Α.Π.Θ.
+\selectlanguage{english}
+

@@ -1,0 +1,10 @@
+"Centralities","AUC"
+"Degree",0.804
+"Betweenneess",0.584
+"Weighted betweenness centrality",0.62
+"Closeness",0.673
+"Information degree",0.539
+"Decision tree C5.0",0.867
+"Decision tree rpart",0.881
+"Decision tree C4.5",0.874
+"Degree in all PPI net of drosophila",0.435

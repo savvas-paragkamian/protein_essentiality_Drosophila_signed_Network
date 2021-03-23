@@ -1,0 +1,12 @@
+base
+methods
+datasets
+utils
+grDevices
+graphics
+stats
+readxl
+ggplot2
+reshape2
+dplyr
+knitr

@@ -1,0 +1,74 @@
+---
+bibliography: Networks Centralities and Negative Weigths.bib
+output:
+  pdf_document: default
+  html_document: default
+  word_document: default
+header-includes:
+- \usepackage{placeins}
+- \usepackage{fancyhdr}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{graphicx}
+- \usepackage{microtype}
+- \onehalfspacing
+- \counterwithin{figure}{section}
+- \counterwithin{table}{section}
+- \usepackage[utf8]{inputenc}
+- \usepackage[greek,english]{babel}
+- \renewcommand{\familydefault}{\sfdefault}
+- \usepackage{helvet}
+- \usepackage{mathtools}
+- \usepackage{amsmath}
+- \usepackage{sansmathfonts}
+- \newtheorem{theorem}{Theorem}
+- \newtheorem{mydef}{Definition}
+- \selectlanguage{english}
+- \usepackage{multirow}
+- \usepackage{subcaption}
+---
+
+# Introduction\label{introduction}
+
+## Gene essentiality
+
+A gene/protein is essential if and only if its removal or disruption results in lethality or infertility of the organism. With the development of knock-out technics [@Tatum1947] scientists started studying the phenotypes of organisms after the removal of a gene [@Gluecksohn-Waelsch1963]. These experiments are part of the genotype - phenotype problem and one of the strongest phenotypes to connect to a genotype is death or infertility. Until the late 1990's these experiments were performed on small scale so testing all possible gene deletions of an organism was incredibly laborious and in most cases impossible. In 1999, for \textit{S.cerevisiae} a large scale experiment was conducted and tested all genes for essentiality consensus [@Winzeler1999]. The large scale detection of essential genes later was performed for \textit{D.melanogaster} using RNAi screens [@Boutros2004]. Currently there are protocols for the small and large scale exploration of essentiality in many organisms [@Lu2015a]. These large scale studies showed that in \textit{S.cerevisiae} about $\approx 17\%$ genes are essential and in \textit{D.melanogaster} this number falls to only $\approx 2\%$ [@Chen2012c]. 
+
+The research interests for essential genes span across many disciplines. Since essential genes are indispensable for the organisms researchers study them in order to find the least possible number of genes to sustain life. The research of the the minimal gene set of an organism in specific environmental conditions has implications in the origins of life problem as well as synthetic biology [@Koonin2003; @Mushegian1996; @Koonin2000]. Minimal genome design has great biotechnology application prospects and one of the latest advancements in the field is the reduction of the genome of \textit{Mycaplasma mycoides} from $1079kb$ pairs to $531kb$ pairs [@Hutchison2016]. Apart from the study of early life and synthetic biology, the study of essential genes is important for medicine. The essential genes of human pathogens are possible drug targets. More specifically the essential genes of pathogens that don't have orhtologs in humans are studied for the design of new drugs. Also the knowledge of human essential genes and their functions will provide valuable information for the origin of diseases, like cancer, and novel therapeutic strategies [@Zhan2016].
+
+Even though so much research has focused on essential genes, the definition of essentiality has some caveats. From the beginning of the study of essentiality, [@Gluecksohn-Waelsch1963] questioned the generality of the term mainly because of the limited conditions tested in experiments. The envromental conditions of the organisms are crucial for the discovery of essential genes because in different conditions the essentiality is very likely to change [@Zhang2015]. Nevertheless, the vast majority of essentiality data available today is derived from experiments in optimum conditions [@DElia2009]. In 2015 [@Liu2015c] added a new parameter to essential genes, evolvability. The authors conducted evolutionary experiments in \textit{S.cerevisiae} and discovered that the organism could overcome the lethal phenotype of the deletion of some of the essential genes by adaptive evolution. They found that $88$ essential genes from the $\approx 1000$ of \textit{S.cerevisiae} can be dispensable through adaptive evolution and thus they have to be distinguished from the other essential genes [@Lieben2015a]. 
+
+Another challenge of gene essentiality is to find its origins. Just after the large scale identification of protein complexes in \textit{S.cerevisiae}, [@Hart2007] found that complexes contain either nonessential proteins or mostly essential proteins. This finding suggests that essentiality is modular which means that the deletion of gene is lethal because it results to malfunction of an essential protein complex. Proteins gather together to form modules, the protein complexes, which are the functional machines of the cell. The modular nature of essentiality is part of a general theme in systems biology to move from the molecular scale to the modular scale with the interactions of the different molecules [@Hartwell1999a; @Koch2012]. The identification of complexes requires first the identification of protein interactions with tandem affinity purification (TAP) of affinity-tagged proteins followed by mass spectrometry and then the computational approaches [@Krogan2006b]. 
+
+\begin{figure}[h]
+\includegraphics[width=0.8\textwidth,trim=0.8cm 3cm 0.8cm 3cm,clip]{../Figures/network_communities.pdf}
+\centering
+\caption{Different approaches to network communities inference. Left: modularity - based methods. Right: overlapping communities.}
+\label{complex_net_communities}
+\end{figure}
+
+The computational problem of complex identification is similar to the community detection problem in networks. The difference is that protein complexes are represented as overlapping communities so modularity based methods are not suitable (see Figure \ref{complex_net_communities}) [@Brohee2006; @Newman2006a]. With the accumulation of the aforementioned protein interactions and protein complexes data for other organisms, [@Ryan2013b] showed that modular essentiality appears to other unicellular organisms and that some complexes between organisms appear to change completely their essentiality status, which further supports the \textit{"All or Nothing"} hypothesis. In this work we tested the \textit{"All or Nothing"} hypothesis for \textit{D.melanogaster}.
+
+## Prediction of essentiality
+
+The experimental discovery of essential genes remains a very laborious procedure even though much progress has been made. In most occasions it's actually impossible to conduct these experiments, so methods for the prediction of essential genes have been developed. After the first genome sequencing projects methods from comparative genomics where used to predict essential genes. These methods used homologous genes to predict essential genes because highly conserved genes are more likely to be essential [@Jordan2002]. Although this method is generally reliable, two limitations have been observed. First, conserved orthologs between species account for a small portion of a genome. Second, orthologs in distantly related species often exhibit differences in gene regulation, function and complexes, leading to a potential diversity of gene essentiality. To circumvent these limitations, researchers have developed feature-based methods that can be used to distinguish essential genes from non-essential ones based on the presence of features similar to those of essential genes [@Cheng2014; @Zhang2016d]. 
+
+The feature-based methods use data like gene expression, RNAi screens, flux balance analysis, protein - protein interactions combined with machine learning and network analysis methods [@Zhang2016d]. The most striking result came in 2001 when the authors of [@Jeong2001a] discovered that hubs (proteins with the highest number of neighbors) are more likely to be essential. This seminal research was done on the protein interaction network of \textit{S.cerevisiae} and introduced the \textit{centrality - lethality rule}. It opened the research for centralities for the detection of essential proteins. Centrality indices are quantitative measures which use the underlying topology of the network to determine node importance [@Freeman1979g]. Later it was recognized that not only protein hubs are essential but also proteins with high betweenness [@Joy2005a]. High betweenness can detect essential proteins that act like \textit{bottlenecks} as seen in Figure \ref{bottleneck_hub} [@Yu2007a]. Researchers afterwards began to integrate different data into novel centrality indices to improve the performance of the prediction as well as the diverse applicability to different organisms [@Jalili2016a].
+
+\begin{figure}[h]
+\includegraphics[width=0.7\textwidth]{../Figures/bottleneck and hub.pdf}
+\centering
+\caption{A schematic representation of the difference between hubs and bottlenecks.}
+\label{bottleneck_hub}
+\end{figure}
+
+The integration of diverse data to centrality indices has proved to be effective. Proteins function in specific sub-locations in the cell and this creates a specific interacting environment. Sub-location information of proteins from various databases was used to create a novel centrality index to predict protein essentiality on protein interaction networks [@Peng2015a]. The most effective method yet for predicting essential proteins is the combination of protein complex information with centralities [@Luo2015] which further supports the modular nature of essentiality. In addition to data integration, method integration resulted to better predictions of essentiality. More specifically, machine learning approaches when applied on centralities showed even better results than individual methods [@Zhang2016d].
+
+The network approach methods for essentiality prediction have been tested, combined and expanded the last decade. The underlying networks are protein networks which have been updated with more reliable interactions even though only $\approx 20\%$ from the total interaction have been detected for the model organisms [@Aebersold2016a]. Protein interaction networks are important because across the species, proteins constitute about 50% of the dry mass of a cell and reach a remarkable total concentration of 2–4 million proteins per cubic micrometer or 100–300 mg per ml [@Aebersold2016a]. But little progress has been made to decipher the function of these physical protein interactions. 
+
+It's important to infer causal relationships between interacting proteins in large scale. These relationships have direction (edge direction), sign (activation/inhibition), weight (strength of activation/inhibition) and mode (e.g. phosphorylation, ubiquitination). That way the protein interaction network would contain signal flow information. The first protein interaction network with signs and weight was created for \textit{D.melanogaster} using RNAi phenotypes and protein interactions [@Vinayagam2014b]. Although smaller that the original protein interaction network of \textit{D.melanogaster}, the signed protein network contains activation / inhibition information which is an important step towards the better representation of cellular processes.
+
+## Aim of this study
+
+The aim of this study was to improve the prediction of essential genes / proteins by extending the centrality – lethality rule to signed protein interaction networks.
+

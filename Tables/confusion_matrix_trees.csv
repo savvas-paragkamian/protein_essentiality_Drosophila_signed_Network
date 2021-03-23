@@ -1,0 +1,5 @@
+"Predicted_condition","C5.0","rpart","C4.5_RWeka"
+"True positives",22,23,21
+"False negatives",124,123,125
+"False positives",4,5,1
+"True negatives",2762,2761,2765

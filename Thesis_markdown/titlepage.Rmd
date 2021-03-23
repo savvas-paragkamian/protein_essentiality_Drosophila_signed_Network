@@ -1,0 +1,211 @@
+---
+output: pdf_document
+geometry: margin = 1.2in
+header-includes:
+- \usepackage{placeins}
+- \usepackage{fancyhdr}
+- \usepackage{setspace}
+- \usepackage{chngcntr}
+- \usepackage{graphicx}
+- \usepackage{microtype}
+- \onehalfspacing
+- \counterwithin{figure}{section}
+- \counterwithin{table}{section}
+- \usepackage[utf8]{inputenc}
+- \usepackage[greek,english]{babel}
+- \renewcommand{\familydefault}{\sfdefault}
+- \usepackage{helvet}
+- \usepackage{mathtools}
+- \usepackage{amsmath}
+- \usepackage{sansmathfonts}
+- \newtheorem{theorem}{Theorem}
+- \newtheorem{mydef}{Definition}
+---
+
+\graphicspath{ {/Users/savasp/Google Drive/Complex Systems Master AUTH/Master Thesis Negative Weights Centralities/Thesis_Essentiality_Drosophila_Signed_Network/Figures/} }
+
+\begin{minipage}{0.2\linewidth}
+\vspace{-1.65cm}
+  \begin{flushleft}
+  \hspace{-1cm}
+  \includegraphics[width=3cm, height=4cm]{omfalos}
+  \end{flushleft}
+\end{minipage}
+\begin{minipage}[t]{0.6\linewidth}
+  \begin{center}
+  \vspace{-2.25cm}
+  \Large
+  \bf 
+  Inter-faculty Master Program on\\
+    Complex Systems and Networks
+  \end{center}
+\end{minipage}
+\begin{minipage}{.2\linewidth}
+\vspace{-1.45cm}
+  \begin{flushright}
+    \hbox{
+      \hspace{1.5em}
+      \includegraphics[width=3cm, height=4cm]{LogoAUTH300ppi}
+      }
+  \end{flushright}
+\end{minipage}
+\vspace{-0.8 cm}
+
+\begin{center}
+\vspace{-0.9cm}
+\large
+\bf
+    SCHOOL of MATHEMATICS\\
+    SCHOOL of BIOLOGY\\
+    SCHOOL of GEOLOGY\\
+    SCHOOL of ECONOMICS\\
+    ARISTOTLE UNIVERSITY of THESSALONIKI
+\end{center}
+
+\begin{centering}
+
+\vspace{2 cm}
+
+\Large
+{\bf Master Thesis}
+\vspace{2 cm}
+
+\large
+{\bf Title}
+
+\LARGE
+
+{\bf The centrality lethality rule in signed protein interaction networks}
+
+\vspace{2 cm}
+
+\Large
+Savas Paragamian
+
+\vspace{2 cm}
+\end{centering}
+
+\begin{flushleft}
+
+\large
+\textbf{Supervisor:} Stefanos Sgardelis, Professor of Biology, AUTH \\
+\textbf{Co-Supervisor:} Ioannis Antoniou, Professor of Mathematics, AUTH \\
+\textbf{Co-Supervisor:} Christoforos Nikolaou, Associate Professor of Biology, UOC
+
+\end{flushleft}
+
+\vspace{2 cm}
+
+\begin{centering}
+\large
+\bf
+Thessaloniki, June 2017
+
+\end{centering}
+
+\newpage
+
+\selectlanguage{greek}
+
+\begin{minipage}{0.2\linewidth}
+\vspace{-1.65cm}
+  \begin{flushleft}
+  \hspace{-1cm}
+  \includegraphics[width=3cm, height=4cm]{omfalos}
+  \end{flushleft}
+\end{minipage}
+\begin{minipage}[t]{0.6\linewidth}
+  \begin{center}
+  \vspace{-2.2cm}
+  \Large
+  \bf 
+ ΔΙΑΤΜΗΜΑΤΙΚΟ ΠΡΟΓΡΑΜΜΑ ΜΕΤΑΠΤΥΧΙΑΚΩΝ ΣΠΟΥΔΩΝ στα \\
+   ΠΟΛΥΠΛΟΚΑ ΣΥΣΤΗΜΑΤΑ και ΔΙΚΤΥΑ
+  \end{center}
+\end{minipage}
+\begin{minipage}{.2\linewidth}
+\vspace{-1.45cm}
+  \begin{flushright}
+    \hbox{
+      \hspace{1.5em}
+      \includegraphics[width=3cm, height=4cm]{LogoAUTH300ppi}
+      }
+  \end{flushright}
+\end{minipage}
+\vspace{-0.8 cm}
+
+\begin{center}
+\vspace{1cm}
+\large
+\bf
+ΤΜΗΜΑ ΜΑΘΗΜΑΤΙΚΩΝ \\
+ΤΜΗΜΑ ΒΙΟΛΟΓΙΑΣ \\
+ΤΜΗΜΑ ΓΕΩΛΟΓΙΑΣ	\\
+ΤΜΗΜΑ ΟΙΚΟΝΟΜΙΚΩΝ ΕΠΙΣΤΗΜΩΝ \\
+ΑΡΙΣΤΟΤΕΛΕΙΟ ΠΑΝΕΠΙΣΤΗΜΙΟ ΘΕΣΣΑΛΟΝΙΚΗΣ
+
+\end{center}
+
+\begin{centering}
+
+\vspace{1 cm}
+
+\large
+{\bf ΜΕΤΑΠΤΥΧΙΑΚΗ ΔΙΠΛΩΜΑΤΙΚΗ ΕΡΓΑΣΙΑ}
+\vspace{1 cm}
+
+\normalsize
+{\bf Τίτλος Εργασίας}
+
+\Large
+
+{\bf Ο κανόνας κεντρικότητας – θνησιμότητας σε προσημασμένα πρωτεϊνικά δίκτυα}
+
+\vspace{1 cm}
+\begin{center}
+\large
+{Σάββας Παραγκαμιάν}
+\vspace{1 cm}
+
+\end{center}
+\end{centering}
+
+\begin{flushleft}
+
+\normalsize
+\textbf{ΕΠΙΒΛΕΠΩΝ:} Στέφανος Σγαρδέλης, Καθηγητής, Τμήμα Βιολογίας ΑΠΘ \\
+\textbf{ΣΥΝΕΠΙΒΛΕΠΩΝ:} Ιωάννης Αντωνίου, Καθηγητής, Τμήμα Μαθηματικών ΑΠΘ \\
+\textbf{ΣΥΝΕΠΙΒΛΕΠΩΝ:} Χριστόφορος Νικολάου, Επίκουρος Καθηγητής, Τμήμα Βιολογίας, Πανεπιστήμιο Κρήτης
+
+\selectlanguage{english}
+\vspace{1cm}
+\selectlanguage{greek}
+\normalsize
+Εγκρίθηκε από την Τριμελή Εξεταστική Επιτροπή την 6η Ιουνίου 2017.
+\selectlanguage{english}
+\end{flushleft}
+
+\vspace{0.7cm}
+
+\selectlanguage{greek}
+\begin{tabular}[h]{p{5cm} p{5cm}  p{5cm} }
+................................ & ................................ & ................................\\
+\parbox[t]{5cm}{Στέφανος Σγαρδέλης\\ Καθηγητής, Τμήμα Βιολογίας ΑΠΘ} & \parbox[t]{5cm}{Ιωάννης Αντωνίου \\Καθηγητής, Τμήμα Μαθηματικών ΑΠΘ} & \parbox[t]{5cm}{Χριστόφορος Νικολάου\\Επίκουρος Καθηγητής, Τμήμα Βιολογίας, Πανεπιστήμιο Κρήτης} \\
+\end{tabular}
+
+\vspace{0.7cm}
+
+\begin{center}
+\large
+
+\selectlanguage{greek}
+\normalsize
+{\bf Θεσσαλονίκη, Ιούνιος  2017}
+\end{center}
+
+\selectlanguage{english}
+
+
+
+
+
